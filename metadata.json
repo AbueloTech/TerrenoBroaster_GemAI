@@ -1,0 +1,6 @@
+{
+  "name": "Terreno Broaster - POS Restaurante",
+  "description": "Sistema POS de Restaurante para Terreno Broaster con CRUD de Platos, Punto de Venta, Historial de Ventas, Consolidado de Productos y Formas de Pago, Dashboard interactivo y soporte de base de datos SQLite.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
