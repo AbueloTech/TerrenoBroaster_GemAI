@@ -263,6 +263,13 @@ export const DatabaseModal: React.FC<DatabaseModalProps> = ({ isOpen, onClose, o
                 </button>
                 <button
                   type="button"
+                  onClick={() => setCustomSql('SELECT Id, Username, Role, FechaRegistro, UltimoAcceso FROM Usuarios;')}
+                  className="px-2 py-0.5 rounded bg-emerald-500/20 text-[10px] text-emerald-300 hover:text-white"
+                >
+                  Usuarios
+                </button>
+                <button
+                  type="button"
                   onClick={() => setCustomSql('SELECT COUNT(*) as TotalPlatos FROM Platos;')}
                   className="px-2 py-0.5 rounded bg-stone-800 text-[10px] text-stone-300 hover:text-white"
                 >

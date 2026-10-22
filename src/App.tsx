@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plato, CartItem, Venta, DetalleVenta, TipoServicio } from './types';
+import { Plato, CartItem, Venta, DetalleVenta, TipoServicio, Usuario } from './types';
 import { sqliteService } from './db/sqliteService';
 import { imageService } from './services/imageService';
 import { Navbar, NavTab } from './components/Navbar';
@@ -12,6 +12,8 @@ import { DatabaseModal } from './components/DatabaseModal';
 import { ImageFolderModal } from './components/ImageFolderModal';
 import { GitHubModal } from './components/GitHubModal';
 import { TicketModal } from './components/TicketModal';
+import { SplashScreen } from './components/SplashScreen';
+import { LoginModal } from './components/LoginModal';
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<NavTab>('pos');
@@ -19,6 +21,18 @@ export default function App() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [isDbLoaded, setIsDbLoaded] = useState<boolean>(false);
   const [activeComandasCount, setActiveComandasCount] = useState<number>(0);
+
+  // Splash & User Authentication State
+  const [showSplash, setShowSplash] = useState<boolean>(true);
+  const [currentUser, setCurrentUser] = useState<Usuario | null>(() => {
+    try {
+      const saved = localStorage.getItem('tb_logged_user');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState<boolean>(false);
 
   // Preselected table location when jumping from Comandas/Mesas map to POS
   const [posPreselectedTipo, setPosPreselectedTipo] = useState<TipoServicio | undefined>(undefined);
@@ -76,6 +90,25 @@ export default function App() {
     setCurrentTab('pos');
   };
 
+  const handleSplashFinish = () => {
+    setShowSplash(false);
+    if (!currentUser) {
+      setIsLoginModalOpen(true);
+    }
+  };
+
+  const handleLoginSuccess = (user: Usuario) => {
+    setCurrentUser(user);
+    localStorage.setItem('tb_logged_user', JSON.stringify(user));
+    setIsLoginModalOpen(false);
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    localStorage.removeItem('tb_logged_user');
+    setIsLoginModalOpen(true);
+  };
+
   const cartTotalItems = cart.reduce((sum, item) => sum + item.cantidad, 0);
 
   return (
@@ -88,6 +121,9 @@ export default function App() {
         onOpenDbModal={() => setIsDbModalOpen(true)}
         onOpenGithubModal={() => setIsGithubModalOpen(true)}
         onOpenImageModal={() => setIsImageModalOpen(true)}
+        onShowSplash={() => setShowSplash(true)}
+        onLogout={handleLogout}
+        currentUser={currentUser}
         cartCount={cartTotalItems}
         totalPlatosCount={platos.length}
         activeComandasCount={activeComandasCount}
@@ -135,6 +171,21 @@ export default function App() {
           <DashboardView />
         )}
       </main>
+
+      {/* Splash Screen (Animated 30s entrance or on demand) */}
+      {showSplash && (
+        <SplashScreen
+          onFinish={handleSplashFinish}
+          defaultDurationSeconds={30}
+        />
+      )}
+
+      {/* Login & User Setup Modal (Mandatory when no active session) */}
+      <LoginModal
+        isOpen={!showSplash && (isLoginModalOpen || !currentUser)}
+        onLoginSuccess={handleLoginSuccess}
+        onCancel={currentUser ? () => setIsLoginModalOpen(false) : undefined}
+      />
 
       {/* Global Modals */}
       <DatabaseModal

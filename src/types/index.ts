@@ -89,3 +89,12 @@ export interface DailySaleStat {
   tickets: number;
   platoTop?: string;
 }
+
+export interface Usuario {
+  Id?: number;
+  Username: string;
+  Password?: string;
+  Role: 'Administrador' | 'Cajero' | 'Supervisor';
+  FechaRegistro?: string;
+  UltimoAcceso?: string;
+}

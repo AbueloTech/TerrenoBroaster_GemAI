@@ -12,6 +12,7 @@ import {
   AcumuladoProducto,
   AcumuladoFormaPago,
   DailySaleStat,
+  Usuario,
 } from '../types';
 import { DEFAULT_PLATOS, generateSeedSales, generateSeedComandas } from '../data/defaultData';
 import { safeParsePrice } from '../utils/currency';
@@ -29,6 +30,7 @@ class SQLiteService {
   private fallbackVentas: Venta[] = [];
   private fallbackDetalles: DetalleVenta[] = [];
   private fallbackComandas: Comanda[] = [];
+  private fallbackUsuarios: Usuario[] = [];
 
   constructor() {
     this.setupFallback();
@@ -154,6 +156,17 @@ class SQLiteService {
         HoraActualizacion TEXT
       );
     `);
+
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS Usuarios (
+        Id INTEGER PRIMARY KEY AUTOINCREMENT,
+        Username TEXT UNIQUE NOT NULL,
+        Password TEXT NOT NULL,
+        Role TEXT NOT NULL,
+        FechaRegistro TEXT NOT NULL,
+        UltimoAcceso TEXT
+      );
+    `);
   }
 
   private seedInitialData() {
@@ -211,6 +224,7 @@ class SQLiteService {
     const storedVentas = localStorage.getItem('tb_fallback_ventas');
     const storedDetalles = localStorage.getItem('tb_fallback_detalles');
     const storedComandas = localStorage.getItem('tb_fallback_comandas');
+    const storedUsuarios = localStorage.getItem('tb_fallback_usuarios');
 
     if (storedPlatos && storedVentas && storedDetalles) {
       try {
@@ -234,6 +248,9 @@ class SQLiteService {
           }));
         } else {
           this.fallbackComandas = generateSeedComandas().comandas;
+        }
+        if (storedUsuarios) {
+          this.fallbackUsuarios = JSON.parse(storedUsuarios);
         }
       } catch {
         this.initDefaultFallback();
@@ -264,6 +281,7 @@ class SQLiteService {
       this.fallbackPlatos = this.getPlatos();
       this.fallbackVentas = this.getVentas();
       this.fallbackComandas = this.getComandas();
+      this.fallbackUsuarios = this.getUsuarios();
     } catch {
       // ignore
     }
@@ -290,6 +308,7 @@ class SQLiteService {
     localStorage.setItem('tb_fallback_ventas', JSON.stringify(this.fallbackVentas));
     localStorage.setItem('tb_fallback_detalles', JSON.stringify(this.fallbackDetalles));
     localStorage.setItem('tb_fallback_comandas', JSON.stringify(this.fallbackComandas));
+    localStorage.setItem('tb_fallback_usuarios', JSON.stringify(this.fallbackUsuarios));
   }
 
   // --- STATUS INFO ---
@@ -1236,9 +1255,187 @@ class SQLiteService {
         const rows = this.fallbackComandas.map((c) => [c.ComandaId, c.Fecha, c.NTicket, c.Cliente, c.TipoServicio, c.Ubicacion, c.Estado, c.Monto, c.FormaPago, c.Notas, c.HoraCreacion, c.HoraActualizacion]);
         return [{ columns: ['ComandaId', 'Fecha', 'NTicket', 'Cliente', 'TipoServicio', 'Ubicacion', 'Estado', 'Monto', 'FormaPago', 'Notas', 'HoraCreacion', 'HoraActualizacion'], values: rows }];
       }
+      if (lower.includes('from usuarios')) {
+        const rows = this.fallbackUsuarios.map((u) => [u.Id || 1, u.Username, u.Role, u.FechaRegistro || '', u.UltimoAcceso || '']);
+        return [{ columns: ['Id', 'Username', 'Role', 'FechaRegistro', 'UltimoAcceso'], values: rows }];
+      }
     }
 
     return [{ columns: ['Resultado'], values: [['Consulta ejecutada en almacenamiento local']] }];
+  }
+
+  // --- USUARIOS & AUTENTICACIÓN ---
+  public getUsuarios(): Usuario[] {
+    if (!this.db) {
+      return [...this.fallbackUsuarios];
+    }
+    try {
+      const res = this.db.exec('SELECT Id, Username, Role, FechaRegistro, UltimoAcceso FROM Usuarios ORDER BY Id ASC');
+      if (res.length === 0) return [...this.fallbackUsuarios];
+      const cols = res[0].columns;
+      return res[0].values.map((row) => {
+        const item: any = {};
+        cols.forEach((col, i) => { item[col] = row[i]; });
+        return {
+          Id: Number(item.Id),
+          Username: String(item.Username),
+          Role: (item.Role as any) || 'Administrador',
+          FechaRegistro: String(item.FechaRegistro || ''),
+          UltimoAcceso: item.UltimoAcceso ? String(item.UltimoAcceso) : undefined,
+        };
+      });
+    } catch (e) {
+      console.warn('Error reading Usuarios:', e);
+      return [...this.fallbackUsuarios];
+    }
+  }
+
+  public hasUsuarios(): boolean {
+    const users = this.getUsuarios();
+    return users.length > 0;
+  }
+
+  public createOrUpdateUsuario(
+    username: string,
+    password: string,
+    role: 'Administrador' | 'Cajero' | 'Supervisor' = 'Administrador'
+  ): { success: boolean; error?: string; user?: Usuario } {
+    const cleanUser = username.trim();
+    const cleanPass = password.trim();
+
+    if (!cleanUser) {
+      return { success: false, error: 'El nombre de usuario es obligatorio' };
+    }
+    if (!cleanPass || cleanPass.length < 3) {
+      return { success: false, error: 'La contraseña debe tener al menos 3 caracteres' };
+    }
+
+    const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
+
+    if (this.db) {
+      try {
+        const checkStmt = this.db.prepare('SELECT Id FROM Usuarios WHERE LOWER(Username) = LOWER(?)');
+        checkStmt.bind([cleanUser]);
+        const exists = checkStmt.step();
+        checkStmt.free();
+
+        if (exists) {
+          const updateStmt = this.db.prepare('UPDATE Usuarios SET Password = ?, Role = ?, UltimoAcceso = ? WHERE LOWER(Username) = LOWER(?)');
+          updateStmt.run([cleanPass, role, now, cleanUser]);
+          updateStmt.free();
+        } else {
+          const insertStmt = this.db.prepare('INSERT INTO Usuarios (Username, Password, Role, FechaRegistro, UltimoAcceso) VALUES (?, ?, ?, ?, ?)');
+          insertStmt.run([cleanUser, cleanPass, role, now, now]);
+          insertStmt.free();
+        }
+
+        const existingIdx = this.fallbackUsuarios.findIndex((u) => u.Username.toLowerCase() === cleanUser.toLowerCase());
+        const userObj: Usuario = {
+          Username: cleanUser,
+          Role: role,
+          FechaRegistro: now,
+          UltimoAcceso: now,
+        };
+        if (existingIdx >= 0) {
+          this.fallbackUsuarios[existingIdx] = { ...this.fallbackUsuarios[existingIdx], ...userObj, Password: cleanPass };
+        } else {
+          this.fallbackUsuarios.push({ ...userObj, Password: cleanPass });
+        }
+
+        this.notify();
+        return { success: true, user: userObj };
+      } catch (e: any) {
+        console.error('Error in createOrUpdateUsuario:', e);
+        return { success: false, error: e.message || 'Error al guardar usuario en base de datos' };
+      }
+    } else {
+      const existingIdx = this.fallbackUsuarios.findIndex((u) => u.Username.toLowerCase() === cleanUser.toLowerCase());
+      const userObj: Usuario = {
+        Id: existingIdx >= 0 ? this.fallbackUsuarios[existingIdx].Id : this.fallbackUsuarios.length + 1,
+        Username: cleanUser,
+        Password: cleanPass,
+        Role: role,
+        FechaRegistro: now,
+        UltimoAcceso: now,
+      };
+      if (existingIdx >= 0) {
+        this.fallbackUsuarios[existingIdx] = userObj;
+      } else {
+        this.fallbackUsuarios.push(userObj);
+      }
+      this.notify();
+      return { success: true, user: userObj };
+    }
+  }
+
+  public validateUsuario(
+    username: string,
+    password: string
+  ): { success: boolean; error?: string; user?: Usuario } {
+    const cleanUser = username.trim();
+    const cleanPass = password.trim();
+
+    if (!cleanUser || !cleanPass) {
+      return { success: false, error: 'Por favor complete todos los campos' };
+    }
+
+    if (this.db) {
+      try {
+        const stmt = this.db.prepare('SELECT Id, Username, Password, Role, FechaRegistro FROM Usuarios WHERE LOWER(Username) = LOWER(?)');
+        stmt.bind([cleanUser]);
+        if (stmt.step()) {
+          const row = stmt.getAsObject();
+          stmt.free();
+          if (String(row.Password) === cleanPass) {
+            const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
+            try {
+              const upd = this.db.prepare('UPDATE Usuarios SET UltimoAcceso = ? WHERE LOWER(Username) = LOWER(?)');
+              upd.run([now, cleanUser]);
+              upd.free();
+              this.notify();
+            } catch {}
+
+            return {
+              success: true,
+              user: {
+                Id: Number(row.Id),
+                Username: String(row.Username),
+                Role: (row.Role as any) || 'Administrador',
+                FechaRegistro: String(row.FechaRegistro || ''),
+                UltimoAcceso: now,
+              },
+            };
+          } else {
+            return { success: false, error: 'Contraseña incorrecta' };
+          }
+        } else {
+          stmt.free();
+          return { success: false, error: 'Usuario no encontrado' };
+        }
+      } catch (e: any) {
+        console.error('validateUsuario error:', e);
+      }
+    }
+
+    const found = this.fallbackUsuarios.find(
+      (u) => u.Username.toLowerCase() === cleanUser.toLowerCase()
+    );
+    if (!found) {
+      return { success: false, error: 'Usuario no encontrado' };
+    }
+    if (found.Password !== cleanPass) {
+      return { success: false, error: 'Contraseña incorrecta' };
+    }
+    return {
+      success: true,
+      user: {
+        Id: found.Id,
+        Username: found.Username,
+        Role: found.Role,
+        FechaRegistro: found.FechaRegistro,
+        UltimoAcceso: new Date().toISOString(),
+      },
+    };
   }
 
   public resetToDefaults() {
@@ -1247,6 +1444,7 @@ class SQLiteService {
     localStorage.removeItem('tb_fallback_ventas');
     localStorage.removeItem('tb_fallback_detalles');
     localStorage.removeItem('tb_fallback_comandas');
+    localStorage.removeItem('tb_fallback_usuarios');
 
     if (this.SQL) {
       this.db = new this.SQL.Database();

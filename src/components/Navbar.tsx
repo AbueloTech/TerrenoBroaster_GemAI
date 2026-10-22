@@ -9,8 +9,12 @@ import {
   Github, 
   Flame,
   ChefHat,
-  Armchair
+  Armchair,
+  User,
+  LogOut,
+  Sparkles,
 } from 'lucide-react';
+import { Usuario } from '../types';
 
 export type NavTab = 'pos' | 'comandas' | 'platos' | 'historial' | 'dashboard';
 
@@ -20,6 +24,9 @@ interface NavbarProps {
   onOpenDbModal: () => void;
   onOpenGithubModal: () => void;
   onOpenImageModal: () => void;
+  onShowSplash?: () => void;
+  onLogout?: () => void;
+  currentUser?: Usuario | null;
   cartCount: number;
   totalPlatosCount: number;
   activeComandasCount?: number;
@@ -31,6 +38,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenDbModal,
   onOpenGithubModal,
   onOpenImageModal,
+  onShowSplash,
+  onLogout,
+  currentUser,
   cartCount,
   totalPlatosCount,
   activeComandasCount = 0,
@@ -139,8 +149,17 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           </nav>
 
-          {/* Action Buttons: DB, Images, GitHub */}
+          {/* Action Buttons: DB, Images, GitHub, Splash, User & Logout */}
           <div className="flex items-center space-x-2">
+            <button
+              onClick={onShowSplash}
+              title="Ver pantalla de bienvenida (Splash)"
+              className="flex items-center space-x-1.5 px-2.5 py-1.5 bg-stone-800 hover:bg-stone-700 text-amber-300 text-xs font-semibold rounded-lg border border-amber-500/30 transition-colors"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              <span className="hidden xl:inline">Splash</span>
+            </button>
+
             <button
               onClick={onOpenImageModal}
               title="Vincular Carpeta de Imágenes (C:\...\img)"
@@ -167,6 +186,28 @@ export const Navbar: React.FC<NavbarProps> = ({
               <Github className="w-3.5 h-3.5" />
               <span className="hidden lg:inline">GitHub</span>
             </button>
+
+            {/* Current User & Logout */}
+            {currentUser && (
+              <div className="flex items-center space-x-1 pl-1 border-l border-stone-800">
+                <div className="hidden sm:flex items-center space-x-1.5 px-2 py-1 bg-stone-950 rounded-lg border border-stone-800 text-xs">
+                  <User className="w-3.5 h-3.5 text-amber-400" />
+                  <span className="font-bold text-stone-200">{currentUser.Username}</span>
+                  <span className="text-[10px] text-amber-300/80 bg-amber-500/10 px-1 py-0.2 rounded font-medium">
+                    {currentUser.Role || 'Admin'}
+                  </span>
+                </div>
+                {onLogout && (
+                  <button
+                    onClick={onLogout}
+                    title="Cerrar Sesión"
+                    className="p-1.5 rounded-lg bg-stone-800 hover:bg-rose-950/60 hover:text-rose-400 text-stone-400 border border-stone-700 transition-colors"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
         </div>
