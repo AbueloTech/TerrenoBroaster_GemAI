@@ -12,7 +12,12 @@ import {
   Armchair,
   User,
   LogOut,
+  LogIn,
   Sparkles,
+  MessageSquare,
+  Volume2,
+  Smartphone,
+  QrCode,
 } from 'lucide-react';
 import { Usuario } from '../types';
 
@@ -24,12 +29,18 @@ interface NavbarProps {
   onOpenDbModal: () => void;
   onOpenGithubModal: () => void;
   onOpenImageModal: () => void;
+  onOpenWhatsAppModal: () => void;
+  onOpenAlertSettingsModal?: () => void;
+  onOpenCustomerMenu?: () => void;
+  onOpenQrModal?: () => void;
+  onOpenLoginModal?: () => void;
   onShowSplash?: () => void;
   onLogout?: () => void;
   currentUser?: Usuario | null;
   cartCount: number;
   totalPlatosCount: number;
   activeComandasCount?: number;
+  pendingWhatsAppCount?: number;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -38,12 +49,18 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenDbModal,
   onOpenGithubModal,
   onOpenImageModal,
+  onOpenWhatsAppModal,
+  onOpenAlertSettingsModal,
+  onOpenCustomerMenu,
+  onOpenQrModal,
+  onOpenLoginModal,
   onShowSplash,
   onLogout,
   currentUser,
   cartCount,
   totalPlatosCount,
   activeComandasCount = 0,
+  pendingWhatsAppCount = 0,
 }) => {
   return (
     <header className="bg-stone-900 border-b border-stone-800 text-white sticky top-0 z-30 shadow-md">
@@ -160,6 +177,57 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span className="hidden xl:inline">Splash</span>
             </button>
 
+            {/* Direct QR Code Modal Trigger - Highly visible */}
+            {onOpenQrModal && (
+              <button
+                onClick={onOpenQrModal}
+                title="Ver, descargar o imprimir Código QR del Menú Digital para mesas y clientes"
+                className="flex items-center space-x-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-400 hover:from-amber-400 hover:to-orange-300 text-stone-950 font-black text-xs rounded-xl shadow-md shadow-amber-500/30 transition-all active:scale-95"
+              >
+                <QrCode className="w-4 h-4 text-stone-950" />
+                <span>Código QR</span>
+              </button>
+            )}
+
+            {/* Customer Digital Menu Mobile View Preview */}
+            {onOpenCustomerMenu && (
+              <button
+                onClick={onOpenCustomerMenu}
+                title="Abrir Menú Digital Móvil con Carrito para Clientes"
+                className="flex items-center space-x-1.5 px-2.5 py-1.5 bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 text-xs font-semibold rounded-lg border border-amber-500/40 transition-colors"
+              >
+                <Smartphone className="w-3.5 h-3.5 text-amber-400" />
+                <span className="hidden sm:inline">Menú Digital</span>
+              </button>
+            )}
+
+            {/* WhatsApp Orders & Alert Button */}
+            <button
+              onClick={onOpenWhatsAppModal}
+              title="Pedidos WhatsApp del Restaurante"
+              className="relative flex items-center space-x-1.5 px-2.5 py-1.5 bg-emerald-950/70 hover:bg-emerald-900/80 text-emerald-300 text-xs font-semibold rounded-lg border border-emerald-500/40 transition-all shadow-sm active:scale-95"
+            >
+              <MessageSquare className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="hidden sm:inline">WhatsApp</span>
+              {pendingWhatsAppCount > 0 && (
+                <span className="flex items-center justify-center px-1.5 py-0.2 rounded-full text-[10px] font-black bg-emerald-500 text-stone-950 animate-pulse shadow-md">
+                  {pendingWhatsAppCount}
+                </span>
+              )}
+            </button>
+
+            {/* Sound & Alert Settings Button */}
+            {onOpenAlertSettingsModal && (
+              <button
+                onClick={onOpenAlertSettingsModal}
+                title="Configurar Volumen y Sonidos de Alerta WhatsApp"
+                className="flex items-center space-x-1 px-2.5 py-1.5 bg-stone-800 hover:bg-stone-700 text-stone-300 hover:text-emerald-400 text-xs font-semibold rounded-lg border border-stone-700 transition-colors"
+              >
+                <Volume2 className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="hidden xl:inline">Sonido</span>
+              </button>
+            )}
+
             <button
               onClick={onOpenImageModal}
               title="Vincular Carpeta de Imágenes (C:\...\img)"
@@ -187,16 +255,21 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span className="hidden lg:inline">GitHub</span>
             </button>
 
-            {/* Current User & Logout */}
-            {currentUser && (
+            {/* User Session & Login Entry */}
+            {currentUser ? (
               <div className="flex items-center space-x-1 pl-1 border-l border-stone-800">
-                <div className="hidden sm:flex items-center space-x-1.5 px-2 py-1 bg-stone-950 rounded-lg border border-stone-800 text-xs">
-                  <User className="w-3.5 h-3.5 text-amber-400" />
+                <button
+                  type="button"
+                  onClick={onOpenLoginModal}
+                  title="Gestionar credenciales o cambiar usuario (Login)"
+                  className="hidden sm:flex items-center space-x-1.5 px-2.5 py-1.5 bg-stone-950 hover:bg-stone-800 rounded-lg border border-stone-800 text-xs transition-colors group cursor-pointer"
+                >
+                  <User className="w-3.5 h-3.5 text-amber-400 group-hover:scale-110 transition-transform" />
                   <span className="font-bold text-stone-200">{currentUser.Username}</span>
                   <span className="text-[10px] text-amber-300/80 bg-amber-500/10 px-1 py-0.2 rounded font-medium">
                     {currentUser.Role || 'Admin'}
                   </span>
-                </div>
+                </button>
                 {onLogout && (
                   <button
                     onClick={onLogout}
@@ -206,6 +279,18 @@ export const Navbar: React.FC<NavbarProps> = ({
                     <LogOut className="w-3.5 h-3.5" />
                   </button>
                 )}
+              </div>
+            ) : (
+              <div className="pl-1 border-l border-stone-800">
+                <button
+                  type="button"
+                  onClick={onOpenLoginModal}
+                  title="Abrir ventana de Login / Iniciar Sesión"
+                  className="flex items-center space-x-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-stone-950 font-black text-xs rounded-xl shadow-md shadow-amber-500/20 transition-all active:scale-95 cursor-pointer"
+                >
+                  <LogIn className="w-3.5 h-3.5" />
+                  <span>Iniciar Sesión</span>
+                </button>
               </div>
             )}
           </div>
@@ -228,6 +313,29 @@ export const Navbar: React.FC<NavbarProps> = ({
             <ChefHat className="w-4 h-4 mb-0.5" />
             <span>Cocina ({activeComandasCount})</span>
           </button>
+          {onOpenQrModal && (
+            <button
+              onClick={onOpenQrModal}
+              className="flex flex-col items-center py-1 px-1.5 text-amber-400 font-bold"
+            >
+              <QrCode className="w-4 h-4 mb-0.5 text-amber-400" />
+              <span>Código QR</span>
+            </button>
+          )}
+          <button
+            onClick={onOpenWhatsAppModal}
+            className="flex flex-col items-center py-1 px-1.5 text-emerald-400 relative"
+          >
+            <div className="relative">
+              <MessageSquare className="w-4 h-4 mb-0.5" />
+              {pendingWhatsAppCount > 0 && (
+                <span className="absolute -top-1 -right-2 bg-emerald-500 text-stone-950 font-black text-[9px] w-3.5 h-3.5 rounded-full flex items-center justify-center animate-pulse">
+                  {pendingWhatsAppCount}
+                </span>
+              )}
+            </div>
+            <span>WhatsApp</span>
+          </button>
           <button
             onClick={() => onTabChange('platos')}
             className={`flex flex-col items-center py-1 px-1.5 ${currentTab === 'platos' ? 'text-amber-400 font-bold' : 'text-stone-400'}`}
@@ -242,13 +350,15 @@ export const Navbar: React.FC<NavbarProps> = ({
             <ReceiptText className="w-4 h-4 mb-0.5" />
             <span>Historial</span>
           </button>
-          <button
-            onClick={() => onTabChange('dashboard')}
-            className={`flex flex-col items-center py-1 px-1.5 ${currentTab === 'dashboard' ? 'text-amber-400 font-bold' : 'text-stone-400'}`}
-          >
-            <BarChart3 className="w-4 h-4 mb-0.5" />
-            <span>Dashboard</span>
-          </button>
+          {onOpenLoginModal && (
+            <button
+              onClick={onOpenLoginModal}
+              className="flex flex-col items-center py-1 px-1.5 text-amber-400 font-semibold"
+            >
+              <User className="w-4 h-4 mb-0.5" />
+              <span>{currentUser ? currentUser.Username.substring(0, 7) : 'Login'}</span>
+            </button>
+          )}
         </div>
       </div>
     </header>

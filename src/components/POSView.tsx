@@ -30,6 +30,7 @@ import {
   FileText,
   Clock,
   ArrowRight,
+  QrCode,
 } from 'lucide-react';
 
 interface POSViewProps {
@@ -38,6 +39,7 @@ interface POSViewProps {
   setCart: React.Dispatch<React.SetStateAction<CartItem[]>>;
   onSaleComplete: (venta: Venta, detalles: DetalleVenta[]) => void;
   onOpenComandas?: () => void;
+  onOpenQrModal?: () => void;
   preselectedTipoServicio?: TipoServicio;
   preselectedUbicacion?: string;
 }
@@ -63,6 +65,7 @@ export const POSView: React.FC<POSViewProps> = ({
   setCart,
   onSaleComplete,
   onOpenComandas,
+  onOpenQrModal,
   preselectedTipoServicio,
   preselectedUbicacion,
 }) => {
@@ -205,15 +208,34 @@ export const POSView: React.FC<POSViewProps> = ({
     return deliveryDireccion.trim() ? `Delivery: ${deliveryDireccion.trim()}` : 'Delivery';
   };
 
-  // 1. ACTION: Enviar a Cocina (Creates Comanda in 'Cocina' state)
+  // 1. ACTION: Enviar a Cocina (Creates or Appends Comanda)
   const handleEnviarACocina = () => {
     if (cart.length === 0) return;
 
     try {
+      const finalUbicacion = getFinalUbicacion();
+
+      // If this table already has an active order in cocina, append cleanly to that ticket!
+      if (tipoServicio === 'Mesas' && activeComandaOnLocation) {
+        sqliteService.addDetallesToComanda(activeComandaOnLocation.NTicket, cart);
+        playBeep(880, 0.12);
+        setTimeout(() => playBeep(1174, 0.14), 110);
+
+        setCart([]);
+        setComandaNotas('');
+        setSentToast({
+          message: `¡Platos agregados exitosamente a la Comanda ${activeComandaOnLocation.NTicket} de ${ubicacionMesa}!`,
+          ticket: activeComandaOnLocation.NTicket,
+        });
+        setTimeout(() => setSentToast(null), 6000);
+        checkActiveComanda();
+        return;
+      }
+
+      // Otherwise create a brand new comanda with a strictly unique ticket number
       const nextTicket = sqliteService.getNextTicketNumber();
       const now = new Date();
       const dateStr = now.toISOString().replace('T', ' ').substring(0, 19);
-      const finalUbicacion = getFinalUbicacion();
 
       const notesParts: string[] = [];
       if (comandaNotas.trim()) notesParts.push(comandaNotas.trim());
@@ -249,6 +271,7 @@ export const POSView: React.FC<POSViewProps> = ({
         ticket: nextTicket,
       });
       setTimeout(() => setSentToast(null), 6000);
+      checkActiveComanda();
     } catch (e: any) {
       alert('Error al enviar la comanda a cocina: ' + e.message);
     }
@@ -274,6 +297,7 @@ export const POSView: React.FC<POSViewProps> = ({
       }
       const fullNotas = notesParts.join(' | ');
 
+      // Create new comanda marked as Cobrado with unique ticket
       const result = sqliteService.createComanda(
         {
           Fecha: dateStr,
@@ -289,6 +313,16 @@ export const POSView: React.FC<POSViewProps> = ({
         },
         cart
       );
+
+      // If table had a previously active comanda in cocina/entregado, close it now so table is freed
+      if (tipoServicio === 'Mesas' && activeComandaOnLocation) {
+        try {
+          sqliteService.updateComandaEstado(activeComandaOnLocation.NTicket, 'Cobrado', formaPago);
+        } catch {
+          // ignore
+        }
+        setActiveComandaOnLocation(null);
+      }
 
       // Confetti celebration
       confetti({
@@ -311,15 +345,40 @@ export const POSView: React.FC<POSViewProps> = ({
         FormaPago: formaPago,
       };
 
-      // Reset and trigger receipt modal
+      // Completely clear cart and state in memory
       setCart([]);
       setIsCheckoutOpen(false);
       setMontoRecibido('');
       setPagoReferencia('');
       setComandaNotas('');
+      checkActiveComanda();
       onSaleComplete(venta, result.detalles);
     } catch (e: any) {
       alert('Error al registrar la venta en SQLite: ' + e.message);
+    }
+  };
+
+  // Direct checkout of the active comanda on this table
+  const handleCobrarComandaMesa = (comandaToCobrar: Comanda) => {
+    try {
+      sqliteService.updateComandaEstado(comandaToCobrar.NTicket, 'Cobrado', formaPago);
+      const venta = sqliteService.getVentaByTicket(comandaToCobrar.NTicket) || {
+        VentasId: comandaToCobrar.ComandaId,
+        Fecha: comandaToCobrar.Fecha,
+        NTicket: comandaToCobrar.NTicket,
+        Cliente: comandaToCobrar.Cliente,
+        Monto: comandaToCobrar.Monto,
+        FormaPago: formaPago,
+      };
+      const detalles = sqliteService.getDetallesByTicket(comandaToCobrar.NTicket);
+
+      setActiveComandaOnLocation(null);
+      setIsCheckoutOpen(false);
+      setCart([]);
+      checkActiveComanda();
+      onSaleComplete(venta, detalles);
+    } catch (e: any) {
+      alert('Error al cobrar comanda de mesa: ' + e.message);
     }
   };
 
@@ -378,6 +437,17 @@ export const POSView: React.FC<POSViewProps> = ({
               >
                 <ChefHat className="w-4 h-4" />
                 <span>Monitor Cocina</span>
+              </button>
+            )}
+
+            {onOpenQrModal && (
+              <button
+                onClick={onOpenQrModal}
+                title="Abrir Código QR del Menú Digital para Clientes"
+                className="flex items-center space-x-1.5 px-3 py-2 bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-stone-950 font-black rounded-xl text-xs transition-all shadow-md shadow-emerald-500/20 shrink-0 active:scale-95"
+              >
+                <QrCode className="w-4 h-4" />
+                <span className="hidden sm:inline">Código QR</span>
               </button>
             )}
           </div>
@@ -578,21 +648,37 @@ export const POSView: React.FC<POSViewProps> = ({
 
               {/* Notice if selected table has active order */}
               {activeComandaOnLocation && (
-                <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-300 flex items-center justify-between">
-                  <div className="flex items-center space-x-1.5 min-w-0 pr-1">
-                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                    <span className="truncate">
-                      Orden activa: <strong>{activeComandaOnLocation.NTicket}</strong> ({activeComandaOnLocation.Estado} • {formatPrice(activeComandaOnLocation.Monto)})
+                <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-300 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-1.5 min-w-0 pr-1">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span className="truncate">
+                        Mesa con comanda activa: <strong className="font-mono">{activeComandaOnLocation.NTicket}</strong> ({activeComandaOnLocation.Estado} • {formatPrice(activeComandaOnLocation.Monto)})
+                      </span>
+                    </div>
+                    {onOpenComandas && (
+                      <button
+                        onClick={onOpenComandas}
+                        className="text-[10px] text-amber-400 hover:underline shrink-0 font-bold ml-1"
+                      >
+                        Ver Cocina
+                      </button>
+                    )}
+                  </div>
+                  
+                  <div className="flex items-center space-x-2 pt-1 border-t border-amber-500/20">
+                    <button
+                      type="button"
+                      onClick={() => handleCobrarComandaMesa(activeComandaOnLocation)}
+                      className="flex-1 py-1 px-2 bg-emerald-600 hover:bg-emerald-500 text-stone-950 font-black rounded-lg text-[10px] flex items-center justify-center space-x-1 transition-colors shadow-sm"
+                    >
+                      <CreditCard className="w-3 h-3" />
+                      <span>Cobrar Mesa ({formatPrice(activeComandaOnLocation.Monto)})</span>
+                    </button>
+                    <span className="text-[10px] text-stone-400">
+                      O añade platos y pulsa Enviar
                     </span>
                   </div>
-                  {onOpenComandas && (
-                    <button
-                      onClick={onOpenComandas}
-                      className="text-[10px] text-amber-400 hover:underline shrink-0 font-bold"
-                    >
-                      Ver
-                    </button>
-                  )}
                 </div>
               )}
             </div>

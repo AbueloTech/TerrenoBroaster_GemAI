@@ -13,9 +13,13 @@ import {
   AcumuladoFormaPago,
   DailySaleStat,
   Usuario,
+  PedidoWhatsApp,
+  EstadoPedidoWhatsApp,
+  PedidoWhatsAppItem,
 } from '../types';
 import { DEFAULT_PLATOS, generateSeedSales, generateSeedComandas } from '../data/defaultData';
 import { safeParsePrice } from '../utils/currency';
+import { menuSyncService } from '../services/menuSyncService';
 
 class SQLiteService {
   private db: Database | null = null;
@@ -31,6 +35,7 @@ class SQLiteService {
   private fallbackDetalles: DetalleVenta[] = [];
   private fallbackComandas: Comanda[] = [];
   private fallbackUsuarios: Usuario[] = [];
+  private fallbackPedidosWhatsApp: PedidoWhatsApp[] = [];
 
   constructor() {
     this.setupFallback();
@@ -47,6 +52,17 @@ class SQLiteService {
   private notify() {
     this.saveToStorage();
     this.listeners.forEach((cb) => cb());
+    if (typeof window !== 'undefined') {
+      try {
+        const livePlatos = this.getPlatos();
+        const livePhone = this.getWhatsAppPhone();
+        if (livePlatos && livePlatos.length > 0) {
+          menuSyncService.pushMenuToServer(livePlatos, livePhone);
+        }
+      } catch {
+        // ignore background push error
+      }
+    }
   }
 
   private async init() {
@@ -82,6 +98,13 @@ class SQLiteService {
       const count = countRes.length > 0 && countRes[0].values[0] ? Number(countRes[0].values[0][0]) : 0;
       if (count === 0) {
         this.seedInitialData();
+      }
+
+      // Check if PedidosWhatsApp has data
+      const waCountRes = this.db.exec('SELECT COUNT(*) as count FROM PedidosWhatsApp');
+      const waCount = waCountRes.length > 0 && waCountRes[0].values[0] ? Number(waCountRes[0].values[0][0]) : 0;
+      if (waCount === 0) {
+        this.seedWhatsAppOrders();
       }
 
       this.syncFallbackFromDb();
@@ -167,6 +190,44 @@ class SQLiteService {
         UltimoAcceso TEXT
       );
     `);
+
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS PedidosWhatsApp (
+        Id INTEGER PRIMARY KEY AUTOINCREMENT,
+        Fecha TEXT NOT NULL,
+        TelefonoCliente TEXT NOT NULL,
+        NombreCliente TEXT NOT NULL,
+        TipoEntrega TEXT NOT NULL,
+        DireccionEntrega TEXT,
+        MensajeOriginal TEXT,
+        ItemsJson TEXT NOT NULL,
+        Total REAL NOT NULL,
+        FormaPago TEXT NOT NULL,
+        Estado TEXT NOT NULL,
+        NTicket TEXT,
+        ComandaId INTEGER,
+        FechaCreacion TEXT NOT NULL,
+        Notas TEXT
+      );
+    `);
+
+    // Schema self-healing: Ensure DetallesId column exists in Detalles table if imported/older DB
+    try {
+      const pragma = this.db.exec("PRAGMA table_info(Detalles);");
+      if (pragma.length > 0 && pragma[0].values) {
+        const colNames = pragma[0].values.map((v: any) => String(v[1]).toLowerCase());
+        if (!colNames.includes('detallesid')) {
+          try {
+            this.db.run("ALTER TABLE Detalles ADD COLUMN DetallesId INTEGER;");
+            this.db.run("UPDATE Detalles SET DetallesId = rowid WHERE DetallesId IS NULL;");
+          } catch {
+            // ignore
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
   }
 
   private seedInitialData() {
@@ -217,6 +278,83 @@ class SQLiteService {
       ]);
     });
     stmtComandas.free();
+
+    this.seedWhatsAppOrders();
+  }
+
+  private seedWhatsAppOrders() {
+    const today = new Date().toISOString().substring(0, 10);
+    const seed: Omit<PedidoWhatsApp, 'Id'>[] = [
+      {
+        Fecha: today,
+        TelefonoCliente: '+1 (555) 876-1122',
+        NombreCliente: 'Carlos Mendoza',
+        TipoEntrega: 'Delivery',
+        DireccionEntrega: 'Av. Principal Los Samanes, Res. Doral, Torre B, Apto 5-2',
+        MensajeOriginal: 'Hola buenas noches! Quisiera hacer un pedido para delivery: 1 Balde Broaster Familiar, 1 Ración de Papas Rusticas, 1 Tequeños de Queso. Efectivo.',
+        Items: [
+          { platoNombre: 'Balde Broaster Familiar (8 Piezas + 2 Papas)', cantidad: 1, precioUnitario: 25.0, categoria: 'Pollo Broaster' },
+          { platoNombre: 'Ración de Papas Fritas Rusticas', cantidad: 1, precioUnitario: 3.5, categoria: 'Raciones' },
+          { platoNombre: 'Tequeños Tradicionales de Queso (5 Und)', cantidad: 1, precioUnitario: 4.5, categoria: 'Raciones' },
+        ],
+        Total: 33.0,
+        FormaPago: 'Efectivo',
+        Estado: 'Pendiente',
+        FechaCreacion: '19:42',
+        Notas: 'Enviar salsa tártara y ajo extra',
+      },
+      {
+        Fecha: today,
+        TelefonoCliente: '+1 (555) 345-9876',
+        NombreCliente: 'Mariana Valero',
+        TipoEntrega: 'Para llevar',
+        DireccionEntrega: 'Retiro en restaurante',
+        MensajeOriginal: 'Buenas tardes! Para retirar en 20 min: 2 Combos Broaster 2 Piezas, 1 Hamburguesa Crispy. Pago con tarjeta al llegar.',
+        Items: [
+          { platoNombre: 'Combo Broaster 2 Piezas + Papas + Ensalada', cantidad: 2, precioUnitario: 8.0, categoria: 'Pollo Broaster' },
+          { platoNombre: 'Hamburguesa Crispy Broaster con Queso', cantidad: 1, precioUnitario: 9.0, categoria: 'Hamburguesas' },
+        ],
+        Total: 25.0,
+        FormaPago: 'Punto de Venta',
+        Estado: 'Pendiente',
+        FechaCreacion: '20:10',
+        Notas: 'Pasa buscando en 20 minutos',
+      },
+    ];
+
+    if (this.db) {
+      try {
+        const stmt = this.db.prepare(
+          'INSERT INTO PedidosWhatsApp (Fecha, TelefonoCliente, NombreCliente, TipoEntrega, DireccionEntrega, MensajeOriginal, ItemsJson, Total, FormaPago, Estado, NTicket, ComandaId, FechaCreacion, Notas) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        seed.forEach((p) => {
+          stmt.run([
+            p.Fecha,
+            p.TelefonoCliente,
+            p.NombreCliente,
+            p.TipoEntrega,
+            p.DireccionEntrega || '',
+            p.MensajeOriginal,
+            JSON.stringify(p.Items),
+            safeParsePrice(p.Total),
+            p.FormaPago,
+            p.Estado,
+            p.NTicket || null,
+            p.ComandaId || null,
+            p.FechaCreacion,
+            p.Notas || '',
+          ]);
+        });
+        stmt.free();
+      } catch (e) {
+        console.warn('seedWhatsAppOrders db insert error:', e);
+      }
+    }
+
+    this.fallbackPedidosWhatsApp = seed.map((p, idx) => ({
+      ...p,
+      Id: idx + 1,
+    }));
   }
 
   private setupFallback() {
@@ -225,6 +363,7 @@ class SQLiteService {
     const storedDetalles = localStorage.getItem('tb_fallback_detalles');
     const storedComandas = localStorage.getItem('tb_fallback_comandas');
     const storedUsuarios = localStorage.getItem('tb_fallback_usuarios');
+    const storedPedidosWA = localStorage.getItem('tb_fallback_pedidos_whatsapp');
 
     if (storedPlatos && storedVentas && storedDetalles) {
       try {
@@ -252,6 +391,11 @@ class SQLiteService {
         if (storedUsuarios) {
           this.fallbackUsuarios = JSON.parse(storedUsuarios);
         }
+        if (storedPedidosWA) {
+          this.fallbackPedidosWhatsApp = JSON.parse(storedPedidosWA);
+        } else {
+          this.seedWhatsAppOrders();
+        }
       } catch {
         this.initDefaultFallback();
       }
@@ -273,6 +417,8 @@ class SQLiteService {
     const seedComandas = generateSeedComandas();
     this.fallbackComandas = seedComandas.comandas;
     this.fallbackDetalles.push(...seedComandas.detallesComandas);
+
+    this.seedWhatsAppOrders();
   }
 
   private syncFallbackFromDb() {
@@ -282,6 +428,7 @@ class SQLiteService {
       this.fallbackVentas = this.getVentas();
       this.fallbackComandas = this.getComandas();
       this.fallbackUsuarios = this.getUsuarios();
+      this.fallbackPedidosWhatsApp = this.getPedidosWhatsApp();
     } catch {
       // ignore
     }
@@ -309,7 +456,9 @@ class SQLiteService {
     localStorage.setItem('tb_fallback_detalles', JSON.stringify(this.fallbackDetalles));
     localStorage.setItem('tb_fallback_comandas', JSON.stringify(this.fallbackComandas));
     localStorage.setItem('tb_fallback_usuarios', JSON.stringify(this.fallbackUsuarios));
+    localStorage.setItem('tb_fallback_pedidos_whatsapp', JSON.stringify(this.fallbackPedidosWhatsApp));
   }
+
 
   // --- STATUS INFO ---
   public getConnectionStatus() {
@@ -320,6 +469,7 @@ class SQLiteService {
       platosCount: this.getPlatos().length,
       ventasCount: this.getVentas().length,
       comandasCount: this.getComandas().length,
+      pedidosWhatsAppCount: this.getPedidosWhatsApp().length,
     };
   }
 
@@ -405,35 +555,52 @@ class SQLiteService {
 
   // --- NEXT TICKET NUMBER ---
   public getNextTicketNumber(): string {
-    let nextNum = 2005;
+    let maxNum = 2004;
+
+    const extractNumber = (ticket: any): number => {
+      if (!ticket) return 0;
+      const str = String(ticket).trim();
+      const matches = str.match(/\d+/g);
+      if (!matches || matches.length === 0) return 0;
+      // Get the last contiguous group of digits (e.g. 'TB-2005' -> 2005)
+      const val = parseInt(matches[matches.length - 1], 10);
+      return isNaN(val) ? 0 : val;
+    };
+
     if (this.db) {
       try {
-        const res = this.db.exec("SELECT NTicket FROM Ventas UNION SELECT NTicket FROM Comandas ORDER BY NTicket DESC LIMIT 1");
-        if (res.length > 0 && res[0].values[0]) {
-          const lastTicket = String(res[0].values[0][0]);
-          const numPart = lastTicket.replace(/\D/g, '');
-          if (numPart) {
-            nextNum = parseInt(numPart, 10) + 1;
+        const res = this.db.exec(
+          "SELECT NTicket FROM Ventas UNION SELECT NTicket FROM Comandas UNION SELECT NTicket FROM Detalles"
+        );
+        if (res.length > 0 && res[0].values) {
+          for (const row of res[0].values) {
+            const val = extractNumber(row[0]);
+            if (val > maxNum) {
+              maxNum = val;
+            }
           }
         }
-      } catch {
-        // fallback
-      }
-    } else {
-      const allTickets = [
-        ...this.fallbackVentas.map((v) => v.NTicket),
-        ...this.fallbackComandas.map((c) => c.NTicket),
-      ];
-      if (allTickets.length > 0) {
-        allTickets.sort();
-        const last = allTickets[allTickets.length - 1];
-        const numPart = last.replace(/\D/g, '');
-        if (numPart) {
-          nextNum = parseInt(numPart, 10) + 1;
-        }
+      } catch (err) {
+        console.warn('Error extracting tickets from SQLite:', err);
       }
     }
-    return `TB-${nextNum}`;
+
+    // Also scan fallback in-memory lists
+    const inMemoryTickets = [
+      ...this.fallbackVentas.map((v) => v.NTicket),
+      ...this.fallbackComandas.map((c) => c.NTicket),
+      ...this.fallbackDetalles.map((d) => d.NTicket),
+      ...this.fallbackPedidosWhatsApp.map((p) => p.NTicket),
+    ];
+
+    for (const t of inMemoryTickets) {
+      const val = extractNumber(t);
+      if (val > maxNum) {
+        maxNum = val;
+      }
+    }
+
+    return `TB-${maxNum + 1}`;
   }
 
   // --- COMANDAS (MESAS, PARA LLEVAR, DELIVERY) ---
@@ -652,6 +819,92 @@ class SQLiteService {
       this.notify();
       return { comanda: newComanda, detalles: createdDetalles };
     }
+  }
+
+  /**
+   * Appends extra items to an existing active kitchen/table comanda without duplicating tickets or recreating comandas
+   */
+  public addDetallesToComanda(nTicket: string, cartItems: CartItem[]): boolean {
+    if (!cartItems || cartItems.length === 0) return false;
+    const comanda = this.getComandaByTicket(nTicket);
+    if (!comanda) return false;
+
+    const addedAmount = cartItems.reduce(
+      (sum, item) => sum + safeParsePrice(item.plato.Precio) * item.cantidad,
+      0
+    );
+    const newTotal = Number((comanda.Monto + addedAmount).toFixed(2));
+    const now = new Date();
+    const dateStr = now.toISOString().replace('T', ' ').substring(0, 19);
+    const timeOnly = now.toTimeString().substring(0, 5);
+
+    if (this.db) {
+      try {
+        const stmtDetalle = this.db.prepare(
+          'INSERT INTO Detalles (Fecha, NTicket, Plato, Precio, Cantidad, Categoria, Importe) VALUES (?, ?, ?, ?, ?, ?, ?)'
+        );
+        cartItems.forEach((item) => {
+          const itemPrice = safeParsePrice(item.plato.Precio);
+          const importe = Number((itemPrice * item.cantidad).toFixed(2));
+          stmtDetalle.run([
+            dateStr,
+            nTicket,
+            item.plato.Plato,
+            itemPrice,
+            item.cantidad,
+            item.plato.Categoria,
+            importe,
+          ]);
+
+          const lastIdRes = this.db!.exec('SELECT last_insert_rowid()');
+          const dId = Number(lastIdRes[0].values[0][0]);
+          this.fallbackDetalles.push({
+            DetallesId: dId,
+            Fecha: dateStr,
+            NTicket: nTicket,
+            Plato: item.plato.Plato,
+            Precio: itemPrice,
+            Cantidad: item.cantidad,
+            Categoria: item.plato.Categoria,
+            Importe: importe,
+          });
+        });
+        stmtDetalle.free();
+
+        const stmtUpd = this.db.prepare(
+          'UPDATE Comandas SET Monto = ?, HoraActualizacion = ? WHERE NTicket = ?'
+        );
+        stmtUpd.run([newTotal, timeOnly, nTicket]);
+        stmtUpd.free();
+      } catch (err) {
+        console.error('Error adding items to comanda in DB:', err);
+      }
+    } else {
+      let dCounter = this.fallbackDetalles.length + 1;
+      cartItems.forEach((item) => {
+        const itemPrice = safeParsePrice(item.plato.Precio);
+        const importe = Number((itemPrice * item.cantidad).toFixed(2));
+        this.fallbackDetalles.push({
+          DetallesId: dCounter++,
+          Fecha: dateStr,
+          NTicket: nTicket,
+          Plato: item.plato.Plato,
+          Precio: itemPrice,
+          Cantidad: item.cantidad,
+          Categoria: item.plato.Categoria,
+          Importe: importe,
+        });
+      });
+    }
+
+    const cIdx = this.fallbackComandas.findIndex((c) => c.NTicket === nTicket);
+    if (cIdx !== -1) {
+      this.fallbackComandas[cIdx].Monto = newTotal;
+      this.fallbackComandas[cIdx].HoraActualizacion = timeOnly;
+    }
+
+    this.notify();
+    return true;
   }
 
   public updateComandaEstado(nTicket: string, nuevoEstado: EstadoComanda, formaPago?: FormaPago): boolean {
@@ -984,21 +1237,27 @@ class SQLiteService {
       return this.fallbackDetalles.filter((d) => d.NTicket === nTicket);
     }
     try {
-      const stmt = this.db.prepare(
-        'SELECT DetallesId, Fecha, NTicket, Plato, Precio, Cantidad, Categoria, Importe FROM Detalles WHERE NTicket = ? ORDER BY DetallesId ASC'
-      );
+      let stmt: any;
+      try {
+        stmt = this.db.prepare(
+          'SELECT rowid as _rowid, * FROM Detalles WHERE NTicket = ? ORDER BY rowid ASC'
+        );
+      } catch {
+        stmt = this.db.prepare('SELECT * FROM Detalles WHERE NTicket = ?');
+      }
       stmt.bind([nTicket]);
       const list: DetalleVenta[] = [];
       while (stmt.step()) {
         const row = stmt.getAsObject();
+        const dId = Number(row.DetallesId ?? row.DetalleId ?? row.ID ?? row.Id ?? row._rowid ?? 1);
         list.push({
-          DetallesId: Number(row.DetallesId),
-          Fecha: String(row.Fecha),
-          NTicket: String(row.NTicket),
-          Plato: String(row.Plato),
+          DetallesId: dId,
+          Fecha: String(row.Fecha || ''),
+          NTicket: String(row.NTicket || nTicket),
+          Plato: String(row.Plato || ''),
           Precio: safeParsePrice(row.Precio),
-          Cantidad: Number(row.Cantidad),
-          Categoria: String(row.Categoria),
+          Cantidad: Number(row.Cantidad || 1),
+          Categoria: String(row.Categoria || ''),
           Importe: safeParsePrice(row.Importe),
         });
       }
@@ -1438,6 +1697,265 @@ class SQLiteService {
     };
   }
 
+  // ==========================================
+  // --- PEDIDOS WHATSAPP & INTEGRATION ---
+  // ==========================================
+
+  public getWhatsAppPhone(): string {
+    const saved = localStorage.getItem('tb_whatsapp_phone');
+    if (saved && saved.trim() !== '+58 412 876-5432') {
+      return saved.trim();
+    }
+    return '';
+  }
+
+  public setWhatsAppPhone(phone: string): void {
+    const clean = phone.trim();
+    localStorage.setItem('tb_whatsapp_phone', clean);
+    this.notify();
+  }
+
+  public getPedidosWhatsApp(estado?: EstadoPedidoWhatsApp): PedidoWhatsApp[] {
+    if (!this.db) {
+      let list = [...this.fallbackPedidosWhatsApp];
+      if (estado) {
+        list = list.filter((p) => p.Estado === estado);
+      }
+      return list.sort((a, b) => b.Id - a.Id);
+    }
+
+    try {
+      let sql = 'SELECT Id, Fecha, TelefonoCliente, NombreCliente, TipoEntrega, DireccionEntrega, MensajeOriginal, ItemsJson, Total, FormaPago, Estado, NTicket, ComandaId, FechaCreacion, Notas FROM PedidosWhatsApp';
+      const params: any[] = [];
+      if (estado) {
+        sql += ' WHERE Estado = ?';
+        params.push(estado);
+      }
+      sql += ' ORDER BY Id DESC';
+
+      const stmt = this.db.prepare(sql);
+      stmt.bind(params);
+      const list: PedidoWhatsApp[] = [];
+
+      while (stmt.step()) {
+        const row = stmt.getAsObject();
+        let items: PedidoWhatsAppItem[] = [];
+        try {
+          items = JSON.parse(String(row.ItemsJson || '[]'));
+        } catch {
+          items = [];
+        }
+
+        list.push({
+          Id: Number(row.Id),
+          Fecha: String(row.Fecha || ''),
+          TelefonoCliente: String(row.TelefonoCliente || ''),
+          NombreCliente: String(row.NombreCliente || ''),
+          TipoEntrega: (row.TipoEntrega as any) || 'Delivery',
+          DireccionEntrega: row.DireccionEntrega ? String(row.DireccionEntrega) : undefined,
+          MensajeOriginal: String(row.MensajeOriginal || ''),
+          Items: items,
+          Total: safeParsePrice(row.Total),
+          FormaPago: (row.FormaPago as any) || 'Pago Movil',
+          Estado: (row.Estado as EstadoPedidoWhatsApp) || 'Pendiente',
+          NTicket: row.NTicket ? String(row.NTicket) : undefined,
+          ComandaId: row.ComandaId ? Number(row.ComandaId) : undefined,
+          FechaCreacion: String(row.FechaCreacion || ''),
+          Notas: row.Notas ? String(row.Notas) : undefined,
+        });
+      }
+      stmt.free();
+      return list;
+    } catch (e) {
+      console.error('getPedidosWhatsApp db error:', e);
+      let list = [...this.fallbackPedidosWhatsApp];
+      if (estado) {
+        list = list.filter((p) => p.Estado === estado);
+      }
+      return list.sort((a, b) => b.Id - a.Id);
+    }
+  }
+
+  public addPedidoWhatsApp(pedidoData: Omit<PedidoWhatsApp, 'Id'>): PedidoWhatsApp {
+    const cleanTotal = safeParsePrice(pedidoData.Total);
+    const itemsJson = JSON.stringify(pedidoData.Items);
+
+    if (this.db) {
+      try {
+        const stmt = this.db.prepare(
+          'INSERT INTO PedidosWhatsApp (Fecha, TelefonoCliente, NombreCliente, TipoEntrega, DireccionEntrega, MensajeOriginal, ItemsJson, Total, FormaPago, Estado, NTicket, ComandaId, FechaCreacion, Notas) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        stmt.run([
+          pedidoData.Fecha,
+          pedidoData.TelefonoCliente,
+          pedidoData.NombreCliente,
+          pedidoData.TipoEntrega,
+          pedidoData.DireccionEntrega || '',
+          pedidoData.MensajeOriginal,
+          itemsJson,
+          cleanTotal,
+          pedidoData.FormaPago,
+          pedidoData.Estado,
+          pedidoData.NTicket || null,
+          pedidoData.ComandaId || null,
+          pedidoData.FechaCreacion,
+          pedidoData.Notas || '',
+        ]);
+        stmt.free();
+
+        const lastIdRes = this.db.exec('SELECT last_insert_rowid()');
+        const newId = Number(lastIdRes[0].values[0][0]);
+        const created: PedidoWhatsApp = {
+          ...pedidoData,
+          Id: newId,
+          Total: cleanTotal,
+        };
+        this.fallbackPedidosWhatsApp.unshift(created);
+        this.notify();
+        return created;
+      } catch (e) {
+        console.error('addPedidoWhatsApp db error:', e);
+      }
+    }
+
+    const nextId = this.fallbackPedidosWhatsApp.length > 0
+      ? Math.max(...this.fallbackPedidosWhatsApp.map((p) => p.Id)) + 1
+      : 1;
+
+    const created: PedidoWhatsApp = {
+      ...pedidoData,
+      Id: nextId,
+      Total: cleanTotal,
+    };
+    this.fallbackPedidosWhatsApp.unshift(created);
+    this.notify();
+    return created;
+  }
+
+  public updatePedidoWhatsAppEstado(
+    id: number,
+    nuevoEstado: EstadoPedidoWhatsApp,
+    nTicket?: string,
+    comandaId?: number
+  ): boolean {
+    if (this.db) {
+      try {
+        const stmt = this.db.prepare(
+          'UPDATE PedidosWhatsApp SET Estado = ?, NTicket = COALESCE(?, NTicket), ComandaId = COALESCE(?, ComandaId) WHERE Id = ?'
+        );
+        stmt.run([nuevoEstado, nTicket || null, comandaId || null, id]);
+        stmt.free();
+      } catch (e) {
+        console.error('updatePedidoWhatsAppEstado db error:', e);
+      }
+    }
+
+    const item = this.fallbackPedidosWhatsApp.find((p) => p.Id === id);
+    if (item) {
+      item.Estado = nuevoEstado;
+      if (nTicket) item.NTicket = nTicket;
+      if (comandaId) item.ComandaId = comandaId;
+    }
+    this.notify();
+    return true;
+  }
+
+  public deletePedidoWhatsApp(id: number): boolean {
+    if (this.db) {
+      try {
+        const stmt = this.db.prepare('DELETE FROM PedidosWhatsApp WHERE Id = ?');
+        stmt.run([id]);
+        stmt.free();
+      } catch (e) {
+        console.error('deletePedidoWhatsApp db error:', e);
+      }
+    }
+
+    this.fallbackPedidosWhatsApp = this.fallbackPedidosWhatsApp.filter((p) => p.Id !== id);
+    this.notify();
+    return true;
+  }
+
+  /**
+   * Converts a WhatsApp Order directly into an active Kitchen Comanda.
+   */
+  public convertWhatsAppPedidoToComanda(
+    pedidoId: number
+  ): { comanda: Comanda; nTicket: string } | null {
+    const pedidos = this.getPedidosWhatsApp();
+    const pedido = pedidos.find((p) => p.Id === pedidoId);
+    if (!pedido) return null;
+
+    const ticket = this.getNextTicketNumber();
+    const platosDisponibles = this.getPlatos();
+
+    // Map items to CartItem format
+    const cartItems: CartItem[] = pedido.Items.map((waItem) => {
+      // 1. Match by platoId if available
+      let platoMatch = waItem.platoId
+        ? platosDisponibles.find((p) => p.ID === waItem.platoId)
+        : undefined;
+
+      // 2. Match by exact plate name (case-insensitive)
+      if (!platoMatch) {
+        platoMatch = platosDisponibles.find(
+          (p) => p.Plato.trim().toLowerCase() === waItem.platoNombre.trim().toLowerCase()
+        );
+      }
+
+      // 3. Match by soft substring match
+      if (!platoMatch) {
+        const itemLower = waItem.platoNombre.trim().toLowerCase();
+        platoMatch = platosDisponibles.find(
+          (p) => p.Plato.toLowerCase().includes(itemLower) || itemLower.includes(p.Plato.toLowerCase())
+        );
+      }
+
+      if (!platoMatch) {
+        platoMatch = {
+          ID: waItem.platoId || 9999,
+          Plato: waItem.platoNombre,
+          Precio: safeParsePrice(waItem.precioUnitario),
+          Categoria: waItem.categoria || 'WhatsApp',
+          Imagen: '',
+        };
+      }
+
+      return {
+        plato: platoMatch,
+        cantidad: waItem.cantidad,
+        nota: waItem.notas,
+      };
+    });
+
+    const ubicacion =
+      pedido.TipoEntrega === 'Delivery'
+        ? `Delivery: ${pedido.DireccionEntrega || 'A convenir'}`
+        : `Para Llevar #${ticket}`;
+
+    const { comanda } = this.createComanda(
+      {
+        Fecha: pedido.Fecha,
+        NTicket: ticket,
+        Cliente: `${pedido.NombreCliente} (WA: ${pedido.TelefonoCliente})`,
+        TipoServicio: pedido.TipoEntrega,
+        Ubicacion: ubicacion,
+        Estado: 'Cocina',
+        Monto: pedido.Total,
+        FormaPago: pedido.FormaPago,
+        Notas: `[WhatsApp] ${pedido.Notas ? pedido.Notas + ' | ' : ''}Tlf: ${pedido.TelefonoCliente}`,
+        HoraCreacion: pedido.FechaCreacion || new Date().toISOString().substring(11, 16),
+      },
+      cartItems
+    );
+
+    // Update WhatsApp order to En Cocina
+    this.updatePedidoWhatsAppEstado(pedido.Id, 'En Cocina', ticket, comanda.ComandaId);
+    this.notify();
+
+    return { comanda, nTicket: ticket };
+  }
+
   public resetToDefaults() {
     localStorage.removeItem('TerrenoBroaster_db_binary');
     localStorage.removeItem('tb_fallback_platos');
@@ -1445,6 +1963,8 @@ class SQLiteService {
     localStorage.removeItem('tb_fallback_detalles');
     localStorage.removeItem('tb_fallback_comandas');
     localStorage.removeItem('tb_fallback_usuarios');
+    localStorage.removeItem('tb_fallback_pedidos_whatsapp');
+    localStorage.removeItem('tb_whatsapp_phone');
 
     if (this.SQL) {
       this.db = new this.SQL.Database();
@@ -1455,5 +1975,6 @@ class SQLiteService {
     this.notify();
   }
 }
+
 
 export const sqliteService = new SQLiteService();

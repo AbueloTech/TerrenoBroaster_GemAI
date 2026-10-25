@@ -98,3 +98,33 @@ export interface Usuario {
   FechaRegistro?: string;
   UltimoAcceso?: string;
 }
+
+export type EstadoPedidoWhatsApp = 'Pendiente' | 'En Cocina' | 'Entregado' | 'Cancelado';
+
+export interface PedidoWhatsAppItem {
+  platoNombre: string;
+  cantidad: number;
+  precioUnitario: number;
+  platoId?: number;
+  categoria?: string;
+  notas?: string;
+}
+
+export interface PedidoWhatsApp {
+  Id: number;
+  Fecha: string; // 'YYYY-MM-DD HH:mm:ss'
+  TelefonoCliente: string;
+  NombreCliente: string;
+  TipoEntrega: 'Delivery' | 'Para llevar';
+  DireccionEntrega?: string;
+  MensajeOriginal: string;
+  Items: PedidoWhatsAppItem[];
+  Total: number;
+  FormaPago: FormaPago;
+  Estado: EstadoPedidoWhatsApp;
+  NTicket?: string;
+  ComandaId?: number;
+  FechaCreacion: string;
+  Notas?: string;
+}
+

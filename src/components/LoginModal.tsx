@@ -13,6 +13,7 @@ import {
   LogIn,
   Sparkles,
   RefreshCw,
+  X,
 } from 'lucide-react';
 import { sqliteService } from '../db/sqliteService';
 import { Usuario } from '../types';
@@ -133,6 +134,17 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         {/* Header with Restaurant Badge */}
         <div className="p-6 bg-gradient-to-b from-stone-950 to-stone-900 border-b border-stone-800 text-center relative">
           
+          {onCancel && (
+            <button
+              type="button"
+              onClick={onCancel}
+              className="absolute top-4 right-4 p-1.5 rounded-xl text-stone-400 hover:text-white hover:bg-stone-800 transition-colors"
+              title="Cerrar ventana"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
+
           {/* Flame Icon Badge */}
           <div className="w-14 h-14 mx-auto mb-3 rounded-2xl bg-gradient-to-tr from-amber-600 via-orange-500 to-amber-400 flex items-center justify-center shadow-lg shadow-amber-500/25 border border-amber-300/30">
             <Flame className="w-8 h-8 text-stone-950 font-black animate-pulse" />

@@ -86,6 +86,8 @@ export function formatPrice(val: any): string {
   return `$${num.toFixed(2)}`;
 }
 
+export const formatCurrency = formatPrice;
+
 /**
  * Formats price with comma/dot option or plain clean number for inputs
  */

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { sqliteService } from '../db/sqliteService';
+import { menuSyncService } from '../services/menuSyncService';
 import {
   Database,
   Download,
@@ -54,9 +55,14 @@ export const DatabaseModal: React.FC<DatabaseModalProps> = ({ isOpen, onClose, o
     try {
       setIsProcessing(true);
       const platosCount = await sqliteService.importDatabase(file);
+      // Immediately push real dishes to server
+      const currentPlatos = sqliteService.getPlatos();
+      const currentPhone = sqliteService.getWhatsAppPhone();
+      await menuSyncService.pushMenuToServer(currentPlatos, currentPhone, true);
+
       setDbStatus(sqliteService.getConnectionStatus());
       setSuccessMessage(
-        `¡Base de datos '${file.name}' sincronizada con éxito! Se cargaron ${platosCount} platos registrados.`
+        `¡Base de datos '${file.name}' sincronizada con éxito! Se cargaron ${platosCount} platos registrados y se actualizaron en el menú digital QR.`
       );
       onDbUpdated();
       setTimeout(() => setSuccessMessage(null), 5000);
@@ -137,7 +143,8 @@ export const DatabaseModal: React.FC<DatabaseModalProps> = ({ isOpen, onClose, o
                 <p className="text-[11px] text-stone-400 mt-0.5">
                   Motor: <span className="text-stone-300 font-semibold">{dbStatus.engine}</span> •{' '}
                   <span className="text-amber-400 font-bold">{dbStatus.platosCount} platos</span> •{' '}
-                  <span className="text-stone-300">{dbStatus.ventasCount} ventas</span>
+                  <span className="text-stone-300">{dbStatus.ventasCount} ventas</span> •{' '}
+                  <span className="text-emerald-400 font-semibold">{dbStatus.pedidosWhatsAppCount || 0} pedidos WA</span>
                 </p>
               </div>
             </div>
@@ -267,6 +274,13 @@ export const DatabaseModal: React.FC<DatabaseModalProps> = ({ isOpen, onClose, o
                   className="px-2 py-0.5 rounded bg-emerald-500/20 text-[10px] text-emerald-300 hover:text-white"
                 >
                   Usuarios
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCustomSql('SELECT Id, Fecha, NombreCliente, TelefonoCliente, TipoEntrega, Total, FormaPago, Estado, NTicket FROM PedidosWhatsApp;')}
+                  className="px-2 py-0.5 rounded bg-green-500/20 text-[10px] text-green-300 hover:text-white"
+                >
+                  PedidosWA
                 </button>
                 <button
                   type="button"
