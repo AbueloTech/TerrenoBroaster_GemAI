@@ -507,10 +507,10 @@ export function buildDigitalMenuWhatsAppUrl(
  * decode authentic SQLite dishes immediately even before network requests finish.
  */
 export function buildDigitalMenuUrl(restaurantPhone?: string, platos?: Plato[]): string {
-  if (typeof window === 'undefined') return '/?menu=true';
-  const base = `${window.location.origin}${window.location.pathname}`;
+  if (typeof window === 'undefined') return '/cliente';
+  const base = `${window.location.origin}/cliente`;
   const clean = restaurantPhone ? restaurantPhone.replace(/[^\d]/g, '') : '';
-  const url = clean ? `${base}?menu=true&phone=${clean}` : `${base}?menu=true`;
+  const url = clean ? `${base}?phone=${clean}` : base;
 
   if (platos && Array.isArray(platos) && platos.length > 0 && platos.length <= 40) {
     try {

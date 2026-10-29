@@ -28,6 +28,7 @@ import { imageService } from '../services/imageService';
 import { menuSyncService } from '../services/menuSyncService';
 import { formatCurrency } from '../utils/currency';
 import { buildDigitalMenuWhatsAppUrl } from '../utils/whatsappParser';
+import { BrandLogo } from './BrandLogo';
 
 interface CustomerCartItem {
   plato: Plato;
@@ -102,8 +103,6 @@ export const CustomerMenuView: React.FC<CustomerMenuViewProps> = ({
       if (isMounted) {
         if (platos && platos.length > 0) {
           setActivePlatos(platos);
-        } else if (!window.location.hash) {
-          setActivePlatos(DEFAULT_PLATOS.map((p, idx) => ({ ...p, ID: idx + 1 })));
         }
       }
     }
@@ -244,9 +243,7 @@ export const CustomerMenuView: React.FC<CustomerMenuViewProps> = ({
       <header className="bg-stone-900 border-b border-stone-800 sticky top-0 z-30 shadow-lg">
         <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-600 via-orange-500 to-amber-400 flex items-center justify-center shadow-md shadow-amber-500/20 text-stone-950">
-              <Flame className="w-6 h-6 animate-pulse" />
-            </div>
+            <BrandLogo className="w-10 h-10" />
             <div>
               <div className="flex items-center space-x-2">
                 <h1 className="font-extrabold text-base sm:text-lg tracking-tight text-white">

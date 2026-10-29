@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Flame, ChefHat, Sparkles, Database, ArrowRight, ShieldCheck, Clock } from 'lucide-react';
+import { ChefHat, Sparkles, Database, ArrowRight, ShieldCheck, Clock } from 'lucide-react';
+import { BrandLogo } from './BrandLogo';
 
 interface SplashScreenProps {
   onFinish: () => void;
@@ -134,9 +135,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({
             {/* Central Restaurant Logo Emblem */}
             <div className="relative z-10 flex flex-col items-center justify-center">
               <div className="relative">
-                <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-gradient-to-br from-amber-500 via-orange-500 to-amber-600 flex items-center justify-center shadow-2xl shadow-amber-500/50 transform group-hover:scale-105 transition-transform">
-                  <Flame className="w-10 h-10 sm:w-12 sm:h-12 text-stone-950 drop-shadow-md animate-bounce" />
-                </div>
+                <BrandLogo className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl border-2 border-amber-400 shadow-2xl shadow-amber-500/50 transform group-hover:scale-105 transition-transform" />
                 {/* Chef Hat Accent Badge */}
                 <div className="absolute -top-3 -right-3 w-8 h-8 rounded-full bg-stone-900 border-2 border-amber-400 flex items-center justify-center shadow-lg">
                   <ChefHat className="w-4 h-4 text-amber-400" />

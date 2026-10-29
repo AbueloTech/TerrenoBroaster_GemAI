@@ -1,5 +1,13 @@
 {
-  "platos": [],
+  "platos": [
+    {
+      "ID": 1,
+      "Plato": "Pepsi 2L",
+      "Precio": 5500,
+      "Categoria": "Bebidas",
+      "Imagen": "bebida6.jpg"
+    }
+  ],
   "restaurantPhone": "",
-  "updatedAt": "2026-10-25T00:00:00.000Z"
+  "updatedAt": "2026-10-28T11:39:26.384Z"
 }

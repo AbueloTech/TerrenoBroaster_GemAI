@@ -16,10 +16,19 @@ import {
   PedidoWhatsApp,
   EstadoPedidoWhatsApp,
   PedidoWhatsAppItem,
+  Insumo,
+  InsumoCategoria,
+  UnidadMedida,
+  RecetaItem,
+  PlatoEscandallo,
+  Proveedor,
+  MovimientoInventario,
+  TipoMovimientoInventario,
 } from '../types';
 import { DEFAULT_PLATOS, generateSeedSales, generateSeedComandas } from '../data/defaultData';
 import { safeParsePrice } from '../utils/currency';
 import { menuSyncService } from '../services/menuSyncService';
+import { safeStorage } from '../utils/safeStorage';
 
 class SQLiteService {
   private db: Database | null = null;
@@ -36,6 +45,10 @@ class SQLiteService {
   private fallbackComandas: Comanda[] = [];
   private fallbackUsuarios: Usuario[] = [];
   private fallbackPedidosWhatsApp: PedidoWhatsApp[] = [];
+  private fallbackInsumos: Insumo[] = [];
+  private fallbackRecetas: RecetaItem[] = [];
+  private fallbackProveedores: Proveedor[] = [];
+  private fallbackMovimientos: MovimientoInventario[] = [];
 
   constructor() {
     this.setupFallback();
@@ -47,6 +60,129 @@ class SQLiteService {
     return () => {
       this.listeners = this.listeners.filter((l) => l !== cb);
     };
+  }
+
+  private syncToServerTimer: any = null;
+  private localFileHandle: any = null;
+  private linkedFileName: string | null = null;
+
+  public isLocalFileLinked(): boolean {
+    return !!this.localFileHandle;
+  }
+
+  public getLinkedFileName(): string | null {
+    return this.linkedFileName;
+  }
+
+  /**
+   * Prompts user to pick the local TerrenoBroaster.db file via File System Access API.
+   * Once linked, every single change will write directly to their physical file on disk!
+   */
+  public async linkLocalDatabaseFile(): Promise<{ success: boolean; filename?: string; error?: string }> {
+    if (typeof window === 'undefined' || !('showOpenFilePicker' in window)) {
+      return {
+        success: false,
+        error: 'Tu navegador no soporta vinculación directa de archivos. Usa el botón "Descargar Base de Datos".',
+      };
+    }
+    try {
+      const [handle] = await (window as any).showOpenFilePicker({
+        types: [
+          {
+            description: 'Base de Datos SQLite (*.db)',
+            accept: { 'application/x-sqlite3': ['.db', '.sqlite', '.sqlite3'] },
+          },
+        ],
+        multiple: false,
+      });
+
+      if (handle) {
+        this.localFileHandle = handle;
+        this.linkedFileName = handle.name;
+        const file = await handle.getFile();
+        await this.importDatabase(file);
+        return { success: true, filename: handle.name };
+      }
+      return { success: false };
+    } catch (err: any) {
+      if (err.name === 'AbortError') return { success: false };
+      return { success: false, error: err.message };
+    }
+  }
+
+  /**
+   * Directly writes the current database binary to the linked physical file on the user's hard drive.
+   */
+  public async saveToLinkedLocalFile(binary?: Uint8Array): Promise<boolean> {
+    if (!this.localFileHandle) return false;
+    try {
+      const writable = await this.localFileHandle.createWritable();
+      const data = binary || (this.db ? this.db.export() : this.exportDatabase());
+      await writable.write(data);
+      await writable.close();
+      console.log(`[File System Access] Base de datos guardada en archivo local: ${this.linkedFileName}`);
+      return true;
+    } catch (e) {
+      console.warn('Could not write to linked local file:', e);
+      return false;
+    }
+  }
+
+  public async uploadDatabaseToServer(binary?: Uint8Array): Promise<boolean> {
+    try {
+      const data = binary || (this.db ? this.db.export() : this.exportDatabase());
+      if (!data || data.byteLength < 50) return false;
+
+      // 1. If user linked a local file on their PC, auto-save straight to disk!
+      this.saveToLinkedLocalFile(data);
+
+      // 2. Upload raw binary to server (Fastest, zero base64 memory overhead)
+      try {
+        const binRes = await fetch('/api/database', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/octet-stream' },
+          body: new Blob([data.buffer as ArrayBuffer]),
+        });
+        if (binRes.ok) {
+          console.log(`[SQLite] Base de datos binaria guardada en servidor (${data.byteLength} bytes)`);
+          return true;
+        }
+      } catch {
+        // Fallback to base64 below
+      }
+
+      // 3. Fallback to base64 JSON upload
+      let binaryStr = '';
+      const len = data.byteLength;
+      const chunkSize = 8192;
+      for (let i = 0; i < len; i += chunkSize) {
+        const chunk = data.subarray(i, Math.min(i + chunkSize, len));
+        binaryStr += String.fromCharCode.apply(null, Array.from(chunk));
+      }
+      const base64 = btoa(binaryStr);
+      const res = await fetch('/api/database', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ base64 }),
+      });
+      if (res.ok) {
+        console.log(`[SQLite] Base de datos guardada en servidor vía base64 (${data.byteLength} bytes)`);
+        return true;
+      }
+      return false;
+    } catch (e) {
+      console.warn('Could not upload database to server:', e);
+      return false;
+    }
+  }
+
+  public scheduleServerDbSync() {
+    if (this.syncToServerTimer) {
+      clearTimeout(this.syncToServerTimer);
+    }
+    this.syncToServerTimer = setTimeout(() => {
+      this.uploadDatabaseToServer();
+    }, 350);
   }
 
   private notify() {
@@ -78,34 +214,43 @@ class SQLiteService {
         });
       }
 
-      const savedDb = localStorage.getItem('TerrenoBroaster_db_binary');
-      if (savedDb) {
-        try {
-          const binary = Uint8Array.from(atob(savedDb), (c) => c.charCodeAt(0));
-          this.db = new this.SQL.Database(binary);
-        } catch (e) {
-          console.warn('Failed restoring saved SQLite binary, starting fresh:', e);
+      // 1. Check if the server already has the permanent TerrenoBroaster.db
+      let loadedFromServer = false;
+      try {
+        const dbRes = await fetch('/api/database', { cache: 'no-store' });
+        if (dbRes.ok) {
+          const ab = await dbRes.arrayBuffer();
+          if (ab && ab.byteLength > 100) {
+            this.db = new this.SQL.Database(new Uint8Array(ab));
+            loadedFromServer = true;
+            console.log(`[SQLite] Loaded master database from server (${ab.byteLength} bytes)`);
+          }
+        }
+      } catch (e) {
+        console.warn('Could not fetch database from server, trying local storage:', e);
+      }
+
+      // 2. If not on server, check local browser storage
+      if (!loadedFromServer) {
+        const savedDb = safeStorage.getItem('TerrenoBroaster_db_binary');
+        if (savedDb) {
+          try {
+            const binary = Uint8Array.from(atob(savedDb), (c) => c.charCodeAt(0));
+            this.db = new this.SQL.Database(binary);
+            // Sync to server so all devices have it
+            this.uploadDatabaseToServer(binary);
+          } catch (e) {
+            console.warn('Failed restoring saved SQLite binary, starting fresh:', e);
+            this.db = new this.SQL.Database();
+          }
+        } else {
           this.db = new this.SQL.Database();
         }
-      } else {
-        this.db = new this.SQL.Database();
       }
 
       this.createTablesIfNotExist();
-
-      // Check if Platos has data
-      const countRes = this.db.exec('SELECT COUNT(*) as count FROM Platos');
-      const count = countRes.length > 0 && countRes[0].values[0] ? Number(countRes[0].values[0][0]) : 0;
-      if (count === 0) {
-        this.seedInitialData();
-      }
-
-      // Check if PedidosWhatsApp has data
-      const waCountRes = this.db.exec('SELECT COUNT(*) as count FROM PedidosWhatsApp');
-      const waCount = waCountRes.length > 0 && waCountRes[0].values[0] ? Number(waCountRes[0].values[0][0]) : 0;
-      if (waCount === 0) {
-        this.seedWhatsAppOrders();
-      }
+      this.seedAdminUserIfNotExist();
+      this.seedInitialInventoryIfEmpty();
 
       this.syncFallbackFromDb();
 
@@ -211,6 +356,67 @@ class SQLiteService {
       );
     `);
 
+    // TABLA: Insumos (Materia prima, ingredientes y productos de venta directa)
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS Insumos (
+        InsumoId INTEGER PRIMARY KEY AUTOINCREMENT,
+        Nombre TEXT NOT NULL,
+        Categoria TEXT NOT NULL,
+        UnidadMedida TEXT NOT NULL,
+        StockActual REAL NOT NULL DEFAULT 0,
+        StockMinimo REAL NOT NULL DEFAULT 0,
+        CostoUnitario REAL NOT NULL DEFAULT 0,
+        ProveedorId INTEGER,
+        EsVentaDirecta INTEGER DEFAULT 0,
+        PlatoId INTEGER,
+        UltimaActualizacion TEXT
+      );
+    `);
+
+    // TABLA: Recetas (Escandallo de ingredientes por cada plato)
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS Recetas (
+        RecetaId INTEGER PRIMARY KEY AUTOINCREMENT,
+        PlatoId INTEGER NOT NULL,
+        InsumoId INTEGER NOT NULL,
+        Cantidad REAL NOT NULL,
+        UnidadMedida TEXT NOT NULL,
+        Notas TEXT
+      );
+    `);
+
+    // TABLA: Proveedores (Directorio de proveedores y contactos)
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS Proveedores (
+        ProveedorId INTEGER PRIMARY KEY AUTOINCREMENT,
+        Nombre TEXT NOT NULL,
+        Rif TEXT,
+        Telefono TEXT,
+        Email TEXT,
+        Contacto TEXT,
+        Direccion TEXT,
+        CategoriasSuministro TEXT,
+        DiasEntrega TEXT,
+        Notas TEXT
+      );
+    `);
+
+    // TABLA: MovimientosInventario (Kardex de trazabilidad: compras, ventas, mermas, ajustes)
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS MovimientosInventario (
+        MovimientoId INTEGER PRIMARY KEY AUTOINCREMENT,
+        Fecha TEXT NOT NULL,
+        InsumoId INTEGER NOT NULL,
+        Tipo TEXT NOT NULL,
+        Cantidad REAL NOT NULL,
+        StockAnterior REAL NOT NULL,
+        StockNuevo REAL NOT NULL,
+        Referencia TEXT,
+        Usuario TEXT,
+        Notas TEXT
+      );
+    `);
+
     // Schema self-healing: Ensure DetallesId column exists in Detalles table if imported/older DB
     try {
       const pragma = this.db.exec("PRAGMA table_info(Detalles);");
@@ -230,140 +436,39 @@ class SQLiteService {
     }
   }
 
-  private seedInitialData() {
+  private seedAdminUserIfNotExist() {
     if (!this.db) return;
+    try {
+      const uRes = this.db.exec("SELECT COUNT(*) FROM Usuarios WHERE Username = 'admin'");
+      const uCount = uRes.length > 0 && uRes[0].values[0] ? Number(uRes[0].values[0][0]) : 0;
+      if (uCount === 0) {
+        const now = new Date().toISOString().substring(0, 10);
+        this.db.run(
+          "INSERT INTO Usuarios (Username, Password, Role, FechaRegistro) VALUES ('admin', 'admin123', 'admin', ?)",
+          [now]
+        );
+      }
+    } catch {
+      // ignore
+    }
+  }
 
-    const stmtPlatos = this.db.prepare('INSERT INTO Platos (Plato, Precio, Categoria, Imagen) VALUES (?, ?, ?, ?)');
-    DEFAULT_PLATOS.forEach((p) => {
-      stmtPlatos.run([p.Plato, safeParsePrice(p.Precio), p.Categoria, p.Imagen]);
-    });
-    stmtPlatos.free();
-
-    const { ventas, detalles } = generateSeedSales();
-    const stmtVentas = this.db.prepare('INSERT INTO Ventas (Fecha, NTicket, Cliente, Monto, FormaPago) VALUES (?, ?, ?, ?, ?)');
-    ventas.forEach((v) => {
-      stmtVentas.run([v.Fecha, v.NTicket, v.Cliente, safeParsePrice(v.Monto), v.FormaPago]);
-    });
-    stmtVentas.free();
-
-    const stmtDetalles = this.db.prepare(
-      'INSERT INTO Detalles (Fecha, NTicket, Plato, Precio, Cantidad, Categoria, Importe) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    );
-    detalles.forEach((d) => {
-      stmtDetalles.run([d.Fecha, d.NTicket, d.Plato, safeParsePrice(d.Precio), d.Cantidad, d.Categoria, safeParsePrice(d.Importe)]);
-    });
-
-    const { comandas, detallesComandas } = generateSeedComandas();
-    detallesComandas.forEach((d) => {
-      stmtDetalles.run([d.Fecha, d.NTicket, d.Plato, safeParsePrice(d.Precio), d.Cantidad, d.Categoria, safeParsePrice(d.Importe)]);
-    });
-    stmtDetalles.free();
-
-    const stmtComandas = this.db.prepare(
-      'INSERT INTO Comandas (Fecha, NTicket, Cliente, TipoServicio, Ubicacion, Estado, Monto, FormaPago, Notas, HoraCreacion, HoraActualizacion) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    );
-    comandas.forEach((c) => {
-      stmtComandas.run([
-        c.Fecha,
-        c.NTicket,
-        c.Cliente,
-        c.TipoServicio,
-        c.Ubicacion,
-        c.Estado,
-        safeParsePrice(c.Monto),
-        c.FormaPago || null,
-        c.Notas || '',
-        c.HoraCreacion,
-        c.HoraActualizacion || null,
-      ]);
-    });
-    stmtComandas.free();
-
-    this.seedWhatsAppOrders();
+  private seedInitialData() {
+    this.seedAdminUserIfNotExist();
+    this.seedInitialInventoryIfEmpty();
   }
 
   private seedWhatsAppOrders() {
-    const today = new Date().toISOString().substring(0, 10);
-    const seed: Omit<PedidoWhatsApp, 'Id'>[] = [
-      {
-        Fecha: today,
-        TelefonoCliente: '+1 (555) 876-1122',
-        NombreCliente: 'Carlos Mendoza',
-        TipoEntrega: 'Delivery',
-        DireccionEntrega: 'Av. Principal Los Samanes, Res. Doral, Torre B, Apto 5-2',
-        MensajeOriginal: 'Hola buenas noches! Quisiera hacer un pedido para delivery: 1 Balde Broaster Familiar, 1 Ración de Papas Rusticas, 1 Tequeños de Queso. Efectivo.',
-        Items: [
-          { platoNombre: 'Balde Broaster Familiar (8 Piezas + 2 Papas)', cantidad: 1, precioUnitario: 25.0, categoria: 'Pollo Broaster' },
-          { platoNombre: 'Ración de Papas Fritas Rusticas', cantidad: 1, precioUnitario: 3.5, categoria: 'Raciones' },
-          { platoNombre: 'Tequeños Tradicionales de Queso (5 Und)', cantidad: 1, precioUnitario: 4.5, categoria: 'Raciones' },
-        ],
-        Total: 33.0,
-        FormaPago: 'Efectivo',
-        Estado: 'Pendiente',
-        FechaCreacion: '19:42',
-        Notas: 'Enviar salsa tártara y ajo extra',
-      },
-      {
-        Fecha: today,
-        TelefonoCliente: '+1 (555) 345-9876',
-        NombreCliente: 'Mariana Valero',
-        TipoEntrega: 'Para llevar',
-        DireccionEntrega: 'Retiro en restaurante',
-        MensajeOriginal: 'Buenas tardes! Para retirar en 20 min: 2 Combos Broaster 2 Piezas, 1 Hamburguesa Crispy. Pago con tarjeta al llegar.',
-        Items: [
-          { platoNombre: 'Combo Broaster 2 Piezas + Papas + Ensalada', cantidad: 2, precioUnitario: 8.0, categoria: 'Pollo Broaster' },
-          { platoNombre: 'Hamburguesa Crispy Broaster con Queso', cantidad: 1, precioUnitario: 9.0, categoria: 'Hamburguesas' },
-        ],
-        Total: 25.0,
-        FormaPago: 'Punto de Venta',
-        Estado: 'Pendiente',
-        FechaCreacion: '20:10',
-        Notas: 'Pasa buscando en 20 minutos',
-      },
-    ];
-
-    if (this.db) {
-      try {
-        const stmt = this.db.prepare(
-          'INSERT INTO PedidosWhatsApp (Fecha, TelefonoCliente, NombreCliente, TipoEntrega, DireccionEntrega, MensajeOriginal, ItemsJson, Total, FormaPago, Estado, NTicket, ComandaId, FechaCreacion, Notas) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-        );
-        seed.forEach((p) => {
-          stmt.run([
-            p.Fecha,
-            p.TelefonoCliente,
-            p.NombreCliente,
-            p.TipoEntrega,
-            p.DireccionEntrega || '',
-            p.MensajeOriginal,
-            JSON.stringify(p.Items),
-            safeParsePrice(p.Total),
-            p.FormaPago,
-            p.Estado,
-            p.NTicket || null,
-            p.ComandaId || null,
-            p.FechaCreacion,
-            p.Notas || '',
-          ]);
-        });
-        stmt.free();
-      } catch (e) {
-        console.warn('seedWhatsAppOrders db insert error:', e);
-      }
-    }
-
-    this.fallbackPedidosWhatsApp = seed.map((p, idx) => ({
-      ...p,
-      Id: idx + 1,
-    }));
+    // No mock WhatsApp orders
   }
 
   private setupFallback() {
-    const storedPlatos = localStorage.getItem('tb_fallback_platos');
-    const storedVentas = localStorage.getItem('tb_fallback_ventas');
-    const storedDetalles = localStorage.getItem('tb_fallback_detalles');
-    const storedComandas = localStorage.getItem('tb_fallback_comandas');
-    const storedUsuarios = localStorage.getItem('tb_fallback_usuarios');
-    const storedPedidosWA = localStorage.getItem('tb_fallback_pedidos_whatsapp');
+    const storedPlatos = safeStorage.getItem('tb_fallback_platos');
+    const storedVentas = safeStorage.getItem('tb_fallback_ventas');
+    const storedDetalles = safeStorage.getItem('tb_fallback_detalles');
+    const storedComandas = safeStorage.getItem('tb_fallback_comandas');
+    const storedUsuarios = safeStorage.getItem('tb_fallback_usuarios');
+    const storedPedidosWA = safeStorage.getItem('tb_fallback_pedidos_whatsapp');
 
     if (storedPlatos && storedVentas && storedDetalles) {
       try {
@@ -386,7 +491,7 @@ class SQLiteService {
             Monto: safeParsePrice(c.Monto),
           }));
         } else {
-          this.fallbackComandas = generateSeedComandas().comandas;
+          this.fallbackComandas = [];
         }
         if (storedUsuarios) {
           this.fallbackUsuarios = JSON.parse(storedUsuarios);
@@ -394,7 +499,7 @@ class SQLiteService {
         if (storedPedidosWA) {
           this.fallbackPedidosWhatsApp = JSON.parse(storedPedidosWA);
         } else {
-          this.seedWhatsAppOrders();
+          this.fallbackPedidosWhatsApp = [];
         }
       } catch {
         this.initDefaultFallback();
@@ -405,20 +510,11 @@ class SQLiteService {
   }
 
   private initDefaultFallback() {
-    this.fallbackPlatos = DEFAULT_PLATOS.map((p, idx) => ({
-      ...p,
-      ID: idx + 1,
-      Precio: safeParsePrice(p.Precio),
-    }));
-    const seed = generateSeedSales();
-    this.fallbackVentas = seed.ventas;
-    this.fallbackDetalles = seed.detalles;
-
-    const seedComandas = generateSeedComandas();
-    this.fallbackComandas = seedComandas.comandas;
-    this.fallbackDetalles.push(...seedComandas.detallesComandas);
-
-    this.seedWhatsAppOrders();
+    this.fallbackPlatos = [];
+    this.fallbackVentas = [];
+    this.fallbackDetalles = [];
+    this.fallbackComandas = [];
+    this.fallbackPedidosWhatsApp = [];
   }
 
   private syncFallbackFromDb() {
@@ -445,18 +541,20 @@ class SQLiteService {
           const chunk = binary.subarray(i, Math.min(i + chunkSize, len));
           binaryStr += String.fromCharCode.apply(null, Array.from(chunk));
         }
-        localStorage.setItem('TerrenoBroaster_db_binary', btoa(binaryStr));
+        safeStorage.setItem('TerrenoBroaster_db_binary', btoa(binaryStr));
+        // Auto-persist binary directly to the server SQLite database file
+        this.scheduleServerDbSync();
       } catch (e) {
         console.warn('LocalStorage save limit for SQLite binary:', e);
       }
     }
 
-    localStorage.setItem('tb_fallback_platos', JSON.stringify(this.fallbackPlatos));
-    localStorage.setItem('tb_fallback_ventas', JSON.stringify(this.fallbackVentas));
-    localStorage.setItem('tb_fallback_detalles', JSON.stringify(this.fallbackDetalles));
-    localStorage.setItem('tb_fallback_comandas', JSON.stringify(this.fallbackComandas));
-    localStorage.setItem('tb_fallback_usuarios', JSON.stringify(this.fallbackUsuarios));
-    localStorage.setItem('tb_fallback_pedidos_whatsapp', JSON.stringify(this.fallbackPedidosWhatsApp));
+    safeStorage.setItem('tb_fallback_platos', JSON.stringify(this.fallbackPlatos));
+    safeStorage.setItem('tb_fallback_ventas', JSON.stringify(this.fallbackVentas));
+    safeStorage.setItem('tb_fallback_detalles', JSON.stringify(this.fallbackDetalles));
+    safeStorage.setItem('tb_fallback_comandas', JSON.stringify(this.fallbackComandas));
+    safeStorage.setItem('tb_fallback_usuarios', JSON.stringify(this.fallbackUsuarios));
+    safeStorage.setItem('tb_fallback_pedidos_whatsapp', JSON.stringify(this.fallbackPedidosWhatsApp));
   }
 
 
@@ -504,6 +602,7 @@ class SQLiteService {
   public addPlato(plato: Omit<Plato, 'ID'>): Plato {
     const cleanPrice = safeParsePrice(plato.Precio);
 
+    let created: Plato;
     if (this.db) {
       const stmt = this.db.prepare('INSERT INTO Platos (Plato, Precio, Categoria, Imagen) VALUES (?, ?, ?, ?)');
       stmt.run([plato.Plato, cleanPrice, plato.Categoria, plato.Imagen || '']);
@@ -512,17 +611,16 @@ class SQLiteService {
       const lastIdRes = this.db.exec('SELECT last_insert_rowid()');
       const newId = Number(lastIdRes[0].values[0][0]);
       
-      const created = { ID: newId, Plato: plato.Plato, Precio: cleanPrice, Categoria: plato.Categoria, Imagen: plato.Imagen };
+      created = { ID: newId, Plato: plato.Plato, Precio: cleanPrice, Categoria: plato.Categoria, Imagen: plato.Imagen };
       this.fallbackPlatos.push(created);
-      this.notify();
-      return created;
     } else {
       const newId = this.fallbackPlatos.length > 0 ? Math.max(...this.fallbackPlatos.map((p) => p.ID)) + 1 : 1;
-      const created: Plato = { ID: newId, Plato: plato.Plato, Precio: cleanPrice, Categoria: plato.Categoria, Imagen: plato.Imagen };
+      created = { ID: newId, Plato: plato.Plato, Precio: cleanPrice, Categoria: plato.Categoria, Imagen: plato.Imagen };
       this.fallbackPlatos.push(created);
-      this.notify();
-      return created;
     }
+    this.notify();
+    this.uploadDatabaseToServer();
+    return created;
   }
 
   public updatePlato(plato: Plato): boolean {
@@ -539,6 +637,7 @@ class SQLiteService {
       this.fallbackPlatos[idx] = { ...plato, Precio: cleanPrice };
     }
     this.notify();
+    this.uploadDatabaseToServer();
     return true;
   }
 
@@ -550,6 +649,7 @@ class SQLiteService {
     }
     this.fallbackPlatos = this.fallbackPlatos.filter((p) => p.ID !== id);
     this.notify();
+    this.uploadDatabaseToServer();
     return true;
   }
 
@@ -760,6 +860,7 @@ class SQLiteService {
         };
 
         this.fallbackComandas.unshift(newComanda);
+        this.descontarInventarioPorItems(cartItems, comandaData.NTicket);
         this.notify();
         return { comanda: newComanda, detalles: createdDetalles };
       } catch (err) {
@@ -1092,6 +1193,7 @@ class SQLiteService {
           HoraActualizacion: ventaData.Fecha.substring(11, 16) || '12:00',
         });
 
+        this.descontarInventarioPorItems(cartItems, ventaData.NTicket);
         this.notify();
         return { venta: newVenta, detalles: createdDetalles };
       } catch (err) {
@@ -1433,11 +1535,22 @@ class SQLiteService {
 
     this.db = new this.SQL.Database(binary);
     this.createTablesIfNotExist();
+    this.seedAdminUserIfNotExist();
+    this.seedInitialInventoryIfEmpty();
 
     this.syncFallbackFromDb();
 
+    // Upload database binary to server so it is permanently saved in .data/TerrenoBroaster.db
+    await this.uploadDatabaseToServer(binary);
+
     const res = this.db.exec('SELECT COUNT(*) FROM Platos');
     const platosCount = res.length > 0 && res[0].values[0] ? Number(res[0].values[0][0]) : 0;
+
+    const platosList = this.getPlatos();
+    const phone = this.getWhatsAppPhone();
+    if (platosList.length > 0) {
+      await menuSyncService.pushMenuToServer(platosList, phone, true);
+    }
 
     this.notify();
     return platosCount;
@@ -1702,7 +1815,7 @@ class SQLiteService {
   // ==========================================
 
   public getWhatsAppPhone(): string {
-    const saved = localStorage.getItem('tb_whatsapp_phone');
+    const saved = safeStorage.getItem('tb_whatsapp_phone');
     if (saved && saved.trim() !== '+58 412 876-5432') {
       return saved.trim();
     }
@@ -1711,7 +1824,7 @@ class SQLiteService {
 
   public setWhatsAppPhone(phone: string): void {
     const clean = phone.trim();
-    localStorage.setItem('tb_whatsapp_phone', clean);
+    safeStorage.setItem('tb_whatsapp_phone', clean);
     this.notify();
   }
 
@@ -1956,15 +2069,843 @@ class SQLiteService {
     return { comanda, nTicket: ticket };
   }
 
-  public resetToDefaults() {
-    localStorage.removeItem('TerrenoBroaster_db_binary');
-    localStorage.removeItem('tb_fallback_platos');
-    localStorage.removeItem('tb_fallback_ventas');
-    localStorage.removeItem('tb_fallback_detalles');
-    localStorage.removeItem('tb_fallback_comandas');
-    localStorage.removeItem('tb_fallback_usuarios');
-    localStorage.removeItem('tb_fallback_pedidos_whatsapp');
-    localStorage.removeItem('tb_whatsapp_phone');
+  // ==========================================
+  // --- SISTEMA DE INVENTARIO & MATERIA PRIMA ---
+  // ==========================================
+
+  public getInsumos(): Insumo[] {
+    if (!this.db) {
+      return [...this.fallbackInsumos];
+    }
+    try {
+      const res = this.db.exec(`
+        SELECT i.InsumoId, i.Nombre, i.Categoria, i.UnidadMedida, i.StockActual, i.StockMinimo, i.CostoUnitario, i.ProveedorId, i.EsVentaDirecta, i.PlatoId, i.UltimaActualizacion, p.Nombre as ProveedorNombre
+        FROM Insumos i
+        LEFT JOIN Proveedores p ON i.ProveedorId = p.ProveedorId
+        ORDER BY i.Categoria ASC, i.Nombre ASC
+      `);
+      if (res.length === 0 || !res[0].values) return [...this.fallbackInsumos];
+      const cols = res[0].columns;
+      return res[0].values.map((row) => {
+        const item: any = {};
+        cols.forEach((c, idx) => { item[c] = row[idx]; });
+        return {
+          InsumoId: Number(item.InsumoId),
+          Nombre: String(item.Nombre),
+          Categoria: item.Categoria as InsumoCategoria,
+          UnidadMedida: item.UnidadMedida as UnidadMedida,
+          StockActual: Number(item.StockActual) || 0,
+          StockMinimo: Number(item.StockMinimo) || 0,
+          CostoUnitario: Number(item.CostoUnitario) || 0,
+          ProveedorId: item.ProveedorId ? Number(item.ProveedorId) : undefined,
+          ProveedorNombre: item.ProveedorNombre ? String(item.ProveedorNombre) : undefined,
+          EsVentaDirecta: Boolean(item.EsVentaDirecta),
+          PlatoId: item.PlatoId ? Number(item.PlatoId) : undefined,
+          UltimaActualizacion: item.UltimaActualizacion ? String(item.UltimaActualizacion) : undefined,
+        };
+      });
+    } catch (e) {
+      console.warn('getInsumos error:', e);
+      return [...this.fallbackInsumos];
+    }
+  }
+
+  public addInsumo(data: Omit<Insumo, 'InsumoId'>): Insumo {
+    const now = new Date().toISOString().substring(0, 10);
+    const cleanStock = Number(data.StockActual) || 0;
+    const cleanMin = Number(data.StockMinimo) || 0;
+    const cleanCost = safeParsePrice(data.CostoUnitario);
+
+    if (this.db) {
+      const stmt = this.db.prepare(
+        'INSERT INTO Insumos (Nombre, Categoria, UnidadMedida, StockActual, StockMinimo, CostoUnitario, ProveedorId, EsVentaDirecta, PlatoId, UltimaActualizacion) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      );
+      stmt.run([
+        data.Nombre.trim(),
+        data.Categoria,
+        data.UnidadMedida,
+        cleanStock,
+        cleanMin,
+        cleanCost,
+        data.ProveedorId || null,
+        data.EsVentaDirecta ? 1 : 0,
+        data.PlatoId || null,
+        now,
+      ]);
+      stmt.free();
+
+      const lastIdRes = this.db.exec('SELECT last_insert_rowid()');
+      const newId = Number(lastIdRes[0].values[0][0]);
+
+      // If initial stock > 0, log initial movement
+      if (cleanStock > 0) {
+        this.registrarMovimiento({
+          Fecha: new Date().toISOString().replace('T', ' ').substring(0, 19),
+          InsumoId: newId,
+          Tipo: 'Entrada_Compra',
+          Cantidad: cleanStock,
+          StockAnterior: 0,
+          StockNuevo: cleanStock,
+          Referencia: 'Inventario Inicial',
+          Usuario: 'Admin',
+          Notas: 'Carga inicial de insumo',
+        });
+      }
+
+      const created: Insumo = {
+        InsumoId: newId,
+        Nombre: data.Nombre.trim(),
+        Categoria: data.Categoria,
+        UnidadMedida: data.UnidadMedida,
+        StockActual: cleanStock,
+        StockMinimo: cleanMin,
+        CostoUnitario: cleanCost,
+        ProveedorId: data.ProveedorId,
+        EsVentaDirecta: data.EsVentaDirecta,
+        PlatoId: data.PlatoId,
+        UltimaActualizacion: now,
+      };
+
+      this.fallbackInsumos.push(created);
+      this.notify();
+      this.uploadDatabaseToServer();
+      return created;
+    } else {
+      const newId = this.fallbackInsumos.length > 0 ? Math.max(...this.fallbackInsumos.map((i) => i.InsumoId)) + 1 : 1;
+      const created: Insumo = {
+        InsumoId: newId,
+        Nombre: data.Nombre.trim(),
+        Categoria: data.Categoria,
+        UnidadMedida: data.UnidadMedida,
+        StockActual: cleanStock,
+        StockMinimo: cleanMin,
+        CostoUnitario: cleanCost,
+        ProveedorId: data.ProveedorId,
+        EsVentaDirecta: data.EsVentaDirecta,
+        PlatoId: data.PlatoId,
+        UltimaActualizacion: now,
+      };
+      this.fallbackInsumos.push(created);
+      this.notify();
+      this.uploadDatabaseToServer();
+      return created;
+    }
+  }
+
+  public updateInsumo(insumo: Insumo): boolean {
+    const now = new Date().toISOString().substring(0, 10);
+    const cleanCost = safeParsePrice(insumo.CostoUnitario);
+    const cleanStock = Number(insumo.StockActual) || 0;
+    const cleanMin = Number(insumo.StockMinimo) || 0;
+
+    if (this.db) {
+      const stmt = this.db.prepare(
+        'UPDATE Insumos SET Nombre = ?, Categoria = ?, UnidadMedida = ?, StockActual = ?, StockMinimo = ?, CostoUnitario = ?, ProveedorId = ?, EsVentaDirecta = ?, PlatoId = ?, UltimaActualizacion = ? WHERE InsumoId = ?'
+      );
+      stmt.run([
+        insumo.Nombre.trim(),
+        insumo.Categoria,
+        insumo.UnidadMedida,
+        cleanStock,
+        cleanMin,
+        cleanCost,
+        insumo.ProveedorId || null,
+        insumo.EsVentaDirecta ? 1 : 0,
+        insumo.PlatoId || null,
+        now,
+        insumo.InsumoId,
+      ]);
+      stmt.free();
+    }
+
+    const idx = this.fallbackInsumos.findIndex((i) => i.InsumoId === insumo.InsumoId);
+    if (idx !== -1) {
+      this.fallbackInsumos[idx] = { ...insumo, CostoUnitario: cleanCost, StockActual: cleanStock, StockMinimo: cleanMin, UltimaActualizacion: now };
+    }
+
+    this.notify();
+    this.uploadDatabaseToServer();
+    return true;
+  }
+
+  public deleteInsumo(insumoId: number): boolean {
+    if (this.db) {
+      this.db.run(`DELETE FROM Recetas WHERE InsumoId = ${insumoId}`);
+      this.db.run(`DELETE FROM Insumos WHERE InsumoId = ${insumoId}`);
+    }
+    this.fallbackInsumos = this.fallbackInsumos.filter((i) => i.InsumoId !== insumoId);
+    this.fallbackRecetas = this.fallbackRecetas.filter((r) => r.InsumoId !== insumoId);
+    this.notify();
+    this.uploadDatabaseToServer();
+    return true;
+  }
+
+  public ajustarStockInsumo(
+    insumoId: number,
+    cantidad: number,
+    tipo: TipoMovimientoInventario,
+    referencia?: string,
+    usuario?: string,
+    notas?: string
+  ): boolean {
+    const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
+    let prevStock = 0;
+
+    if (this.db) {
+      const res = this.db.exec(`SELECT StockActual FROM Insumos WHERE InsumoId = ${insumoId}`);
+      if (res.length > 0 && res[0].values.length > 0) {
+        prevStock = Number(res[0].values[0][0]) || 0;
+      }
+    } else {
+      const found = this.fallbackInsumos.find((i) => i.InsumoId === insumoId);
+      if (found) prevStock = found.StockActual;
+    }
+
+    let nuevoStock = prevStock;
+    if (tipo === 'Entrada_Compra') {
+      nuevoStock = Number((prevStock + Math.abs(cantidad)).toFixed(3));
+    } else if (tipo === 'Salida_Venta' || tipo === 'Merma_Desperdicio') {
+      nuevoStock = Math.max(0, Number((prevStock - Math.abs(cantidad)).toFixed(3)));
+    } else if (tipo === 'Ajuste_Manual') {
+      nuevoStock = Math.max(0, Number(cantidad.toFixed(3)));
+    }
+
+    if (this.db) {
+      this.db.run(`UPDATE Insumos SET StockActual = ?, UltimaActualizacion = ? WHERE InsumoId = ?`, [
+        nuevoStock,
+        now.substring(0, 10),
+        insumoId,
+      ]);
+    }
+
+    const idx = this.fallbackInsumos.findIndex((i) => i.InsumoId === insumoId);
+    if (idx !== -1) {
+      this.fallbackInsumos[idx].StockActual = nuevoStock;
+      this.fallbackInsumos[idx].UltimaActualizacion = now.substring(0, 10);
+    }
+
+    this.registrarMovimiento({
+      Fecha: now,
+      InsumoId: insumoId,
+      Tipo: tipo,
+      Cantidad: tipo === 'Ajuste_Manual' ? Number((nuevoStock - prevStock).toFixed(3)) : cantidad,
+      StockAnterior: prevStock,
+      StockNuevo: nuevoStock,
+      Referencia: referencia || 'Ajuste de Almacén',
+      Usuario: usuario || 'Cajero/Admin',
+      Notas: notas || '',
+    });
+
+    this.notify();
+    this.uploadDatabaseToServer();
+    return true;
+  }
+
+  // ==========================================
+  // --- PROVEEDORES ---
+  // ==========================================
+
+  public getProveedores(): Proveedor[] {
+    if (!this.db) {
+      return [...this.fallbackProveedores];
+    }
+    try {
+      const res = this.db.exec('SELECT * FROM Proveedores ORDER BY Nombre ASC');
+      if (res.length === 0 || !res[0].values) return [...this.fallbackProveedores];
+      const cols = res[0].columns;
+      return res[0].values.map((row) => {
+        const item: any = {};
+        cols.forEach((c, idx) => { item[c] = row[idx]; });
+        return {
+          ProveedorId: Number(item.ProveedorId),
+          Nombre: String(item.Nombre),
+          Rif: item.Rif ? String(item.Rif) : undefined,
+          Telefono: item.Telefono ? String(item.Telefono) : undefined,
+          Email: item.Email ? String(item.Email) : undefined,
+          Contacto: item.Contacto ? String(item.Contacto) : undefined,
+          Direccion: item.Direccion ? String(item.Direccion) : undefined,
+          CategoriasSuministro: item.CategoriasSuministro ? String(item.CategoriasSuministro) : undefined,
+          DiasEntrega: item.DiasEntrega ? String(item.DiasEntrega) : undefined,
+          Notas: item.Notas ? String(item.Notas) : undefined,
+        };
+      });
+    } catch (e) {
+      console.warn('getProveedores error:', e);
+      return [...this.fallbackProveedores];
+    }
+  }
+
+  public addProveedor(p: Omit<Proveedor, 'ProveedorId'>): Proveedor {
+    if (this.db) {
+      const stmt = this.db.prepare(
+        'INSERT INTO Proveedores (Nombre, Rif, Telefono, Email, Contacto, Direccion, CategoriasSuministro, DiasEntrega, Notas) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      );
+      stmt.run([
+        p.Nombre.trim(),
+        p.Rif ? p.Rif.trim() : null,
+        p.Telefono ? p.Telefono.trim() : null,
+        p.Email ? p.Email.trim() : null,
+        p.Contacto ? p.Contacto.trim() : null,
+        p.Direccion ? p.Direccion.trim() : null,
+        p.CategoriasSuministro ? p.CategoriasSuministro.trim() : null,
+        p.DiasEntrega ? p.DiasEntrega.trim() : null,
+        p.Notas ? p.Notas.trim() : null,
+      ]);
+      stmt.free();
+
+      const lastIdRes = this.db.exec('SELECT last_insert_rowid()');
+      const newId = Number(lastIdRes[0].values[0][0]);
+      const created: Proveedor = { ProveedorId: newId, ...p };
+      this.fallbackProveedores.push(created);
+      this.notify();
+      this.uploadDatabaseToServer();
+      return created;
+    } else {
+      const newId = this.fallbackProveedores.length > 0 ? Math.max(...this.fallbackProveedores.map((pr) => pr.ProveedorId)) + 1 : 1;
+      const created: Proveedor = { ProveedorId: newId, ...p };
+      this.fallbackProveedores.push(created);
+      this.notify();
+      this.uploadDatabaseToServer();
+      return created;
+    }
+  }
+
+  public updateProveedor(p: Proveedor): boolean {
+    if (this.db) {
+      const stmt = this.db.prepare(
+        'UPDATE Proveedores SET Nombre = ?, Rif = ?, Telefono = ?, Email = ?, Contacto = ?, Direccion = ?, CategoriasSuministro = ?, DiasEntrega = ?, Notas = ? WHERE ProveedorId = ?'
+      );
+      stmt.run([
+        p.Nombre.trim(),
+        p.Rif ? p.Rif.trim() : null,
+        p.Telefono ? p.Telefono.trim() : null,
+        p.Email ? p.Email.trim() : null,
+        p.Contacto ? p.Contacto.trim() : null,
+        p.Direccion ? p.Direccion.trim() : null,
+        p.CategoriasSuministro ? p.CategoriasSuministro.trim() : null,
+        p.DiasEntrega ? p.DiasEntrega.trim() : null,
+        p.Notas ? p.Notas.trim() : null,
+        p.ProveedorId,
+      ]);
+      stmt.free();
+    }
+    const idx = this.fallbackProveedores.findIndex((pr) => pr.ProveedorId === p.ProveedorId);
+    if (idx !== -1) {
+      this.fallbackProveedores[idx] = { ...p };
+    }
+    this.notify();
+    this.uploadDatabaseToServer();
+    return true;
+  }
+
+  public deleteProveedor(proveedorId: number): boolean {
+    if (this.db) {
+      this.db.run(`UPDATE Insumos SET ProveedorId = NULL WHERE ProveedorId = ${proveedorId}`);
+      this.db.run(`DELETE FROM Proveedores WHERE ProveedorId = ${proveedorId}`);
+    }
+    this.fallbackProveedores = this.fallbackProveedores.filter((pr) => pr.ProveedorId !== proveedorId);
+    this.notify();
+    this.uploadDatabaseToServer();
+    return true;
+  }
+
+  // ==========================================
+  // --- RECETAS & ESCANDALLOS ---
+  // ==========================================
+
+  public getRecetas(): RecetaItem[] {
+    if (!this.db) {
+      return [...this.fallbackRecetas];
+    }
+    try {
+      const res = this.db.exec(`
+        SELECT r.RecetaId, r.PlatoId, r.InsumoId, r.Cantidad, r.UnidadMedida, r.Notas, i.Nombre as InsumoNombre, i.Categoria as InsumoCategoria, i.CostoUnitario as CostoUnitarioInsumo
+        FROM Recetas r
+        JOIN Insumos i ON r.InsumoId = i.InsumoId
+        ORDER BY r.PlatoId ASC, r.RecetaId ASC
+      `);
+      if (res.length === 0 || !res[0].values) return [...this.fallbackRecetas];
+      const cols = res[0].columns;
+      return res[0].values.map((row) => {
+        const item: any = {};
+        cols.forEach((c, idx) => { item[c] = row[idx]; });
+        const qty = Number(item.Cantidad) || 0;
+        const unitCost = Number(item.CostoUnitarioInsumo) || 0;
+        return {
+          RecetaId: Number(item.RecetaId),
+          PlatoId: Number(item.PlatoId),
+          InsumoId: Number(item.InsumoId),
+          Cantidad: qty,
+          UnidadMedida: item.UnidadMedida as UnidadMedida,
+          Notas: item.Notas ? String(item.Notas) : undefined,
+          InsumoNombre: item.InsumoNombre ? String(item.InsumoNombre) : undefined,
+          InsumoCategoria: item.InsumoCategoria as InsumoCategoria,
+          CostoUnitarioInsumo: unitCost,
+          CostoPorPorcion: Number((qty * unitCost).toFixed(2)),
+        };
+      });
+    } catch (e) {
+      console.warn('getRecetas error:', e);
+      return [...this.fallbackRecetas];
+    }
+  }
+
+  public getRecetaByPlato(platoId: number): RecetaItem[] {
+    return this.getRecetas().filter((r) => r.PlatoId === platoId);
+  }
+
+  public setRecetaForPlato(
+    platoId: number,
+    items: Array<RecetaItem | { insumoId: number; cantidad: number; unidadMedida: UnidadMedida; notas?: string }>
+  ): boolean {
+    const normalized = items.map((it: any) => ({
+      insumoId: Number(it.insumoId || it.InsumoId),
+      cantidad: Number(it.cantidad ?? it.Cantidad ?? 0),
+      unidadMedida: (it.unidadMedida || it.UnidadMedida || 'unidad') as UnidadMedida,
+      notas: it.notas || it.Notas || '',
+    }));
+
+    if (this.db) {
+      this.db.run(`DELETE FROM Recetas WHERE PlatoId = ${platoId}`);
+      const stmt = this.db.prepare('INSERT INTO Recetas (PlatoId, InsumoId, Cantidad, UnidadMedida, Notas) VALUES (?, ?, ?, ?, ?)');
+      normalized.forEach((it) => {
+        if (it.insumoId && it.cantidad > 0) {
+          stmt.run([platoId, it.insumoId, Number(it.cantidad), it.unidadMedida, it.notas || null]);
+        }
+      });
+      stmt.free();
+    }
+
+    this.fallbackRecetas = this.fallbackRecetas.filter((r) => r.PlatoId !== platoId);
+    normalized.forEach((it, idx) => {
+      if (it.insumoId && it.cantidad > 0) {
+        this.fallbackRecetas.push({
+          RecetaId: Date.now() + idx,
+          PlatoId: platoId,
+          InsumoId: it.insumoId,
+          Cantidad: Number(it.cantidad),
+          UnidadMedida: it.unidadMedida,
+          Notas: it.notas,
+        });
+      }
+    });
+
+    this.notify();
+    this.uploadDatabaseToServer();
+    return true;
+  }
+
+  public deleteRecetaItem(recetaId: number): boolean {
+    if (this.db) {
+      this.db.run(`DELETE FROM Recetas WHERE RecetaId = ${recetaId}`);
+    }
+    this.fallbackRecetas = this.fallbackRecetas.filter((r) => r.RecetaId !== recetaId);
+    this.notify();
+    this.uploadDatabaseToServer();
+    return true;
+  }
+
+  /**
+   * Generates a complete Escandallo (cost & profit structure) for every dish in the restaurant.
+   */
+  public getPlatosEscandallos(): PlatoEscandallo[] {
+    const platos = this.getPlatos();
+    const allRecetas = this.getRecetas();
+
+    return platos.map((plato) => {
+      const ingredientes = allRecetas.filter((r) => r.PlatoId === plato.ID);
+      const costoTotalInsumos = ingredientes.reduce((acc, curr) => acc + (curr.CostoPorPorcion || 0), 0);
+      const precioVenta = safeParsePrice(plato.Precio);
+      const margenBruto = precioVenta - costoTotalInsumos;
+      const margenPorcentaje = precioVenta > 0 ? ((precioVenta - costoTotalInsumos) / precioVenta) * 100 : 0;
+      const margenSobreCosto = costoTotalInsumos > 0 ? ((precioVenta - costoTotalInsumos) / costoTotalInsumos) * 100 : 0;
+
+      // Standard gastronomy pricing rules:
+      // Price = Food Cost / (1 - Target Margin)
+      // For 60% Margin (40% Food Cost): Cost / 0.40
+      // For 50% Margin (50% Food Cost): Cost / 0.50
+      // For 70% Margin (30% Food Cost): Cost / 0.30
+      const precioSugeridoMargen60 = costoTotalInsumos > 0 ? Math.round(costoTotalInsumos / 0.40) : precioVenta;
+      const precioSugeridoMargen50 = costoTotalInsumos > 0 ? Math.round(costoTotalInsumos / 0.50) : precioVenta;
+      const precioSugeridoMargen70 = costoTotalInsumos > 0 ? Math.round(costoTotalInsumos / 0.30) : precioVenta;
+
+      return {
+        PlatoId: plato.ID,
+        PlatoNombre: plato.Plato,
+        Categoria: plato.Categoria,
+        PrecioVentaActual: precioVenta,
+        Ingredientes: ingredientes,
+        CostoTotalInsumos: Number(costoTotalInsumos.toFixed(2)),
+        MargenBruto: Number(margenBruto.toFixed(2)),
+        MargenPorcentaje: Number(margenPorcentaje.toFixed(1)),
+        MargenSobreCosto: Number(margenSobreCosto.toFixed(1)),
+        PrecioSugeridoMargen60: precioSugeridoMargen60,
+        PrecioSugeridoMargen50: precioSugeridoMargen50,
+        PrecioSugeridoMargen70: precioSugeridoMargen70,
+        TieneReceta: ingredientes.length > 0,
+      };
+    });
+  }
+
+  // ==========================================
+  // --- MOVIMIENTOS & KARDEX DE TRAZABILIDAD ---
+  // ==========================================
+
+  public getMovimientosInventario(limit = 100): MovimientoInventario[] {
+    if (!this.db) {
+      return [...this.fallbackMovimientos].sort((a, b) => b.MovimientoId - a.MovimientoId).slice(0, limit);
+    }
+    try {
+      const res = this.db.exec(`
+        SELECT m.MovimientoId, m.Fecha, m.InsumoId, m.Tipo, m.Cantidad, m.StockAnterior, m.StockNuevo, m.Referencia, m.Usuario, m.Notas, i.Nombre as InsumoNombre
+        FROM MovimientosInventario m
+        LEFT JOIN Insumos i ON m.InsumoId = i.InsumoId
+        ORDER BY m.MovimientoId DESC
+        LIMIT ${limit}
+      `);
+      if (res.length === 0 || !res[0].values) return [...this.fallbackMovimientos].slice(0, limit);
+      const cols = res[0].columns;
+      return res[0].values.map((row) => {
+        const item: any = {};
+        cols.forEach((c, idx) => { item[c] = row[idx]; });
+        return {
+          MovimientoId: Number(item.MovimientoId),
+          Fecha: String(item.Fecha),
+          InsumoId: Number(item.InsumoId),
+          InsumoNombre: item.InsumoNombre ? String(item.InsumoNombre) : undefined,
+          Tipo: item.Tipo as TipoMovimientoInventario,
+          Cantidad: Number(item.Cantidad),
+          StockAnterior: Number(item.StockAnterior),
+          StockNuevo: Number(item.StockNuevo),
+          Referencia: item.Referencia ? String(item.Referencia) : undefined,
+          Usuario: item.Usuario ? String(item.Usuario) : undefined,
+          Notas: item.Notas ? String(item.Notas) : undefined,
+        };
+      });
+    } catch (e) {
+      console.warn('getMovimientosInventario error:', e);
+      return [...this.fallbackMovimientos].slice(0, limit);
+    }
+  }
+
+  public registrarMovimiento(mov: Omit<MovimientoInventario, 'MovimientoId' | 'Fecha'> & { Fecha?: string }): boolean {
+    const fecha = mov.Fecha || new Date().toISOString().replace('T', ' ').substring(0, 19);
+    if (this.db) {
+      try {
+        const stmt = this.db.prepare(
+          'INSERT INTO MovimientosInventario (Fecha, InsumoId, Tipo, Cantidad, StockAnterior, StockNuevo, Referencia, Usuario, Notas) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        stmt.run([
+          fecha,
+          mov.InsumoId,
+          mov.Tipo,
+          Number(mov.Cantidad),
+          Number(mov.StockAnterior),
+          Number(mov.StockNuevo),
+          mov.Referencia || null,
+          mov.Usuario || null,
+          mov.Notas || null,
+        ]);
+        stmt.free();
+        return true;
+      } catch (err) {
+        console.warn('registrarMovimiento DB error:', err);
+        return false;
+      }
+    } else {
+      const newId = this.fallbackMovimientos.length > 0 ? Math.max(...this.fallbackMovimientos.map((m) => m.MovimientoId)) + 1 : 1;
+      this.fallbackMovimientos.unshift({ MovimientoId: newId, Fecha: fecha, ...mov });
+      return true;
+    }
+  }
+
+  /**
+   * Real-time trace deduction: Called automatically on POS sale or comanda creation.
+   * Deducts recipe ingredients for prepared dishes (Pizza, Broaster, Hamburguesas)
+   * or direct inventory for direct items (Bebidas), logging each to the Kardex.
+   */
+  public descontarInventarioPorItems(cartItems: CartItem[], ticket: string): void {
+    if (!Array.isArray(cartItems) || cartItems.length === 0) return;
+    try {
+      const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
+
+      cartItems.forEach((item) => {
+        const platoId = item.plato.ID;
+        const qtySold = item.cantidad;
+
+        // 1. Check if the dish has recipe ingredients
+        const receta = this.getRecetaByPlato(platoId);
+        if (receta.length > 0) {
+          receta.forEach((ing) => {
+            const deductQty = Number((ing.Cantidad * qtySold).toFixed(3));
+            let prevStock = 0;
+            if (this.db) {
+              const curRes = this.db.exec(`SELECT StockActual, Nombre FROM Insumos WHERE InsumoId = ${ing.InsumoId}`);
+              if (curRes.length > 0 && curRes[0].values.length > 0) {
+                prevStock = Number(curRes[0].values[0][0]) || 0;
+                const newStock = Math.max(0, Number((prevStock - deductQty).toFixed(3)));
+                this.db.run(`UPDATE Insumos SET StockActual = ?, UltimaActualizacion = ? WHERE InsumoId = ?`, [
+                  newStock,
+                  now.substring(0, 10),
+                  ing.InsumoId,
+                ]);
+
+                this.registrarMovimiento({
+                  Fecha: now,
+                  InsumoId: ing.InsumoId,
+                  Tipo: 'Salida_Venta',
+                  Cantidad: deductQty,
+                  StockAnterior: prevStock,
+                  StockNuevo: newStock,
+                  Referencia: ticket,
+                  Usuario: 'Caja POS',
+                  Notas: `Preparación de ${qtySold}x ${item.plato.Plato}`,
+                });
+              }
+            } else {
+              const fIdx = this.fallbackInsumos.findIndex((i) => i.InsumoId === ing.InsumoId);
+              if (fIdx !== -1) {
+                prevStock = this.fallbackInsumos[fIdx].StockActual;
+                const newStock = Math.max(0, Number((prevStock - deductQty).toFixed(3)));
+                this.fallbackInsumos[fIdx].StockActual = newStock;
+                this.registrarMovimiento({
+                  Fecha: now,
+                  InsumoId: ing.InsumoId,
+                  Tipo: 'Salida_Venta',
+                  Cantidad: deductQty,
+                  StockAnterior: prevStock,
+                  StockNuevo: newStock,
+                  Referencia: ticket,
+                  Usuario: 'Caja POS',
+                  Notas: `Preparación de ${qtySold}x ${item.plato.Plato}`,
+                });
+              }
+            }
+          });
+        } else {
+          // 2. Direct inventory deduction (e.g. Beverages or direct sales)
+          const pName = item.plato.Plato.toLowerCase().trim();
+          let directInsumoId: number | null = null;
+          let prevStock = 0;
+
+          if (this.db) {
+            const dirRes = this.db.exec(
+              `SELECT InsumoId, StockActual, Nombre FROM Insumos WHERE EsVentaDirecta = 1 AND (PlatoId = ${platoId} OR LOWER(Nombre) = '${pName}' OR LOWER(Nombre) LIKE '%${pName}%') LIMIT 1`
+            );
+            if (dirRes.length > 0 && dirRes[0].values.length > 0) {
+              directInsumoId = Number(dirRes[0].values[0][0]);
+              prevStock = Number(dirRes[0].values[0][1]) || 0;
+            }
+          } else {
+            const fInsumo = this.fallbackInsumos.find(
+              (i) => i.EsVentaDirecta && (i.PlatoId === platoId || i.Nombre.toLowerCase().includes(pName) || pName.includes(i.Nombre.toLowerCase()))
+            );
+            if (fInsumo) {
+              directInsumoId = fInsumo.InsumoId;
+              prevStock = fInsumo.StockActual;
+            }
+          }
+
+          if (directInsumoId) {
+            const newStock = Math.max(0, Number((prevStock - qtySold).toFixed(3)));
+            if (this.db) {
+              this.db.run(`UPDATE Insumos SET StockActual = ?, UltimaActualizacion = ? WHERE InsumoId = ?`, [
+                newStock,
+                now.substring(0, 10),
+                directInsumoId,
+              ]);
+            } else {
+              const fIdx = this.fallbackInsumos.findIndex((i) => i.InsumoId === directInsumoId);
+              if (fIdx !== -1) this.fallbackInsumos[fIdx].StockActual = newStock;
+            }
+
+            this.registrarMovimiento({
+              Fecha: now,
+              InsumoId: directInsumoId,
+              Tipo: 'Salida_Venta',
+              Cantidad: qtySold,
+              StockAnterior: prevStock,
+              StockNuevo: newStock,
+              Referencia: ticket,
+              Usuario: 'Caja POS',
+              Notas: `Venta directa de ${qtySold}x ${item.plato.Plato}`,
+            });
+          }
+        }
+      });
+    } catch (err) {
+      console.warn('Error in descontarInventarioPorItems:', err);
+    }
+  }
+
+  // ==========================================
+  // --- INVENTARIO SEED DATA ---
+  // ==========================================
+
+  private seedInitialInventoryIfEmpty(): void {
+    if (!this.db) return;
+    try {
+      const pRes = this.db.exec("SELECT COUNT(*) FROM Proveedores");
+      const pCount = pRes.length > 0 && pRes[0].values[0] ? Number(pRes[0].values[0][0]) : 0;
+      if (pCount === 0) {
+        const proveedores = [
+          ['Molinos & Harinas La Suprema C.A.', 'J-30819201-9', '+58 414 777-4321', 'ventas@molinossuprema.com', 'Ing. Carlos Mendoza', 'Zona Industrial Los Galpones, Galpón 4', 'Harinas, Levaduras, Mantecas', 'Martes y Jueves', 'Proveedor de harinas para pizzas y panes'],
+          ['Distribuidora Avícola Los Andes', 'J-40192831-2', '+58 412 555-1201', 'pedidos@avicolalosandes.com', 'Sr. Roberto Rivas', 'Carretera Nacional Km 12', 'Pollo beneficiado, Pechugas, Alitas', 'Lunes, Miércoles, Viernes', 'Pollo fresco para broaster'],
+          ['Lácteos & Quesos del Valle', 'J-50129482-1', '+58 424 999-8811', 'lacteosdelvalle@gmail.com', 'Sra. Elena Morales', 'Av. Intercomunal Sector El Prado', 'Queso Mozzarella, Queso Amarillo', 'Diario', 'Mozzarella especial para pizzas fundidas'],
+          ['Distribuidora Polar / Bebidas del Centro', 'J-00041362-8', '+58 412 333-7766', 'distribuidorpolar@polar.com', 'Lic. Fernando Gómez', 'Zona Industrial Este #88', 'Pepsi, Malta, Glup, Refrescos, Agua', 'Lunes y Jueves', 'Distribuidor de bebidas y refrescos'],
+          ['Agro-Verduras & Salsas Central', 'V-18294819-0', '+58 416 222-3344', 'agroverduras@gmail.com', 'Pedro Castillo', 'Mercado Mayorista Local 14', 'Vegetales, Papas, Salsas, Condimentos', 'Martes y Viernes', 'Papas para freír y salsas'],
+          ['Empaques & Desechables El Rosal', 'J-41209384-5', '+58 414 111-2233', 'ventas@empaqueselrosal.com', 'Mariana Dávila', 'Calle Comercio #45', 'Cajas de Pizza, Baldes Broaster, Servilletas', 'Miércoles', 'Empaques de alta resistencia']
+        ];
+        proveedores.forEach((p) => {
+          this.db!.run(
+            'INSERT INTO Proveedores (Nombre, Rif, Telefono, Email, Contacto, Direccion, CategoriasSuministro, DiasEntrega, Notas) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            p
+          );
+        });
+      }
+
+      const iRes = this.db.exec("SELECT COUNT(*) FROM Insumos");
+      const iCount = iRes.length > 0 && iRes[0].values[0] ? Number(iRes[0].values[0][0]) : 0;
+      if (iCount === 0) {
+        const now = new Date().toISOString().substring(0, 10);
+        const insumos = [
+          // Pizzas raw ingredients
+          ['Harina de Trigo Especial', 'Harinas & Panadería', 'kg', 50, 15, 1200, 1, 0, null, now],
+          ['Levadura Seca Instantánea', 'Harinas & Panadería', 'kg', 5, 2, 8500, 1, 0, null, now],
+          ['Sal Refinada', 'Salsas & Condimentos', 'kg', 20, 5, 450, 1, 0, null, now],
+          ['Manteca Vegetal / Grasa', 'Aceites & Grasas', 'kg', 25, 8, 2800, 1, 0, null, now],
+          ['Aceite Vegetal para Freidora', 'Aceites & Grasas', 'litro', 80, 20, 2400, 1, 0, null, now],
+          ['Salsa de Tomate Base Pizza', 'Salsas & Condimentos', 'kg', 40, 10, 2200, 5, 0, null, now],
+          ['Queso Mozzarella Rallado', 'Quesos & Lácteos', 'kg', 35, 10, 7500, 3, 0, null, now],
+          ['Jamón Especial para Pizza', 'Carnes & Pollo', 'kg', 20, 6, 6200, 3, 0, null, now],
+          ['Peperoni Rebanado', 'Carnes & Pollo', 'kg', 15, 5, 8900, 3, 0, null, now],
+          ['Orégano Molido', 'Salsas & Condimentos', 'g', 1000, 200, 5, 5, 0, null, now],
+          ['Caja de Pizza Mediana/Grande', 'Empaques & Desechables', 'unidad', 200, 50, 450, 6, 0, null, now],
+
+          // Broaster & Chicken ingredients
+          ['Pollo Beneficiado en Piezas', 'Carnes & Pollo', 'kg', 120, 30, 4200, 2, 0, null, now],
+          ['Harina para Empanizado Broaster', 'Harinas & Panadería', 'kg', 60, 20, 1800, 1, 0, null, now],
+          ['Mezcla Secreta de Especias Broaster', 'Salsas & Condimentos', 'kg', 15, 5, 4500, 5, 0, null, now],
+          ['Papas para Freír', 'Vegetales & Verduras', 'kg', 90, 25, 1300, 5, 0, null, now],
+          ['Caja / Balde para Broaster', 'Empaques & Desechables', 'unidad', 300, 80, 350, 6, 0, null, now],
+
+          // Hamburguesas & Extras
+          ['Pan de Hamburguesa Ajonjolí', 'Harinas & Panadería', 'unidad', 100, 30, 600, 1, 0, null, now],
+          ['Carne de Res Moldeada', 'Carnes & Pollo', 'kg', 40, 12, 5800, 2, 0, null, now],
+          ['Queso Amarillo Rebanado', 'Quesos & Lácteos', 'kg', 25, 8, 7200, 3, 0, null, now],
+          ['Tocineta Ahumada', 'Carnes & Pollo', 'kg', 15, 5, 8400, 2, 0, null, now],
+
+          // Direct sales (Bebidas)
+          ['Pepsi 2 Litros', 'Bebidas (Venta Directa)', 'botella', 48, 12, 3800, 4, 1, 1, now],
+          ['Pepsi 1.5 Litros', 'Bebidas (Venta Directa)', 'botella', 36, 10, 3100, 4, 1, null, now],
+          ['Coca Cola 2 Litros', 'Bebidas (Venta Directa)', 'botella', 40, 12, 4200, 4, 1, null, now],
+          ['Glup 2 Litros', 'Bebidas (Venta Directa)', 'botella', 30, 10, 2200, 4, 1, null, now],
+          ['Malta Polar', 'Bebidas (Venta Directa)', 'botella', 60, 20, 1400, 4, 1, null, now],
+          ['Agua Mineral 600ml', 'Bebidas (Venta Directa)', 'botella', 50, 15, 800, 4, 1, null, now]
+        ];
+
+        insumos.forEach((ins) => {
+          this.db!.run(
+            'INSERT INTO Insumos (Nombre, Categoria, UnidadMedida, StockActual, StockMinimo, CostoUnitario, ProveedorId, EsVentaDirecta, PlatoId, UltimaActualizacion) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            ins
+          );
+        });
+
+        this.seedInitialRecipes();
+      }
+    } catch (e) {
+      console.warn('Error seeding initial inventory:', e);
+    }
+  }
+
+  private seedInitialRecipes(): void {
+    if (!this.db) return;
+    try {
+      const pRes = this.db.exec("SELECT ID, Plato, Categoria FROM Platos");
+      if (pRes.length === 0 || !pRes[0].values) return;
+
+      const insRes = this.db.exec("SELECT InsumoId, Nombre FROM Insumos");
+      if (insRes.length === 0 || !insRes[0].values) return;
+
+      const insMap: Record<string, number> = {};
+      insRes[0].values.forEach((row) => {
+        insMap[String(row[1]).toLowerCase()] = Number(row[0]);
+      });
+
+      const getIns = (term: string) => {
+        const key = Object.keys(insMap).find((k) => k.includes(term.toLowerCase()));
+        return key ? insMap[key] : null;
+      };
+
+      const harinaTrigo = getIns('harina de trigo');
+      const levadura = getIns('levadura');
+      const manteca = getIns('manteca');
+      const sal = getIns('sal refinada');
+      const salsaPizza = getIns('salsa de tomate base');
+      const mozzarella = getIns('mozzarella');
+      const cajaPizza = getIns('caja de pizza');
+
+      const pollo = getIns('pollo beneficiado');
+      const harinaBroaster = getIns('harina para empanizado');
+      const especiasBroaster = getIns('especias broaster');
+      const aceite = getIns('aceite vegetal');
+      const papas = getIns('papas para fre');
+      const baldeBroaster = getIns('caja / balde');
+
+      const panHamb = getIns('pan de hamburguesa');
+      const carneRes = getIns('carne de res');
+      const quesoAmarillo = getIns('queso amarillo');
+
+      const stmt = this.db.prepare('INSERT INTO Recetas (PlatoId, InsumoId, Cantidad, UnidadMedida, Notas) VALUES (?, ?, ?, ?, ?)');
+
+      pRes[0].values.forEach((row) => {
+        const id = Number(row[0]);
+        const name = String(row[1]).toLowerCase();
+        const cat = String(row[2]).toLowerCase();
+
+        // Pizza recipes
+        if (cat.includes('pizza') || name.includes('pizza') || name.includes('4 estaciones') || name.includes('charcutera') || name.includes('hawaiana')) {
+          if (harinaTrigo) stmt.run([id, harinaTrigo, 0.25, 'kg', 'Masa de pizza']);
+          if (levadura) stmt.run([id, levadura, 0.005, 'kg', 'Fermentación']);
+          if (sal) stmt.run([id, sal, 0.003, 'kg', 'Sazón masa']);
+          if (manteca) stmt.run([id, manteca, 0.015, 'kg', 'Grasa masa']);
+          if (salsaPizza) stmt.run([id, salsaPizza, 0.09, 'kg', 'Base salsa']);
+          if (mozzarella) stmt.run([id, mozzarella, 0.18, 'kg', 'Queso fundido']);
+          if (cajaPizza) stmt.run([id, cajaPizza, 1, 'unidad', 'Empaque']);
+        }
+        // Broaster & Chicken recipes
+        else if (cat.includes('pollo') || name.includes('broaster') || name.includes('clásica') || name.includes('ahorro') || name.includes('irresistible') || name.includes('alita')) {
+          if (pollo) stmt.run([id, pollo, 0.55, 'kg', 'Piezas de pollo']);
+          if (harinaBroaster) stmt.run([id, harinaBroaster, 0.1, 'kg', 'Empanizado crujiente']);
+          if (especiasBroaster) stmt.run([id, especiasBroaster, 0.015, 'kg', 'Sabor tradicional']);
+          if (aceite) stmt.run([id, aceite, 0.04, 'litro', 'Fritura']);
+          if (papas) stmt.run([id, papas, 0.18, 'kg', 'Acompañante']);
+          if (baldeBroaster) stmt.run([id, baldeBroaster, 1, 'unidad', 'Empaque']);
+        }
+        // Hamburguesas
+        else if (cat.includes('hamburguesa') || name.includes('hamb')) {
+          if (panHamb) stmt.run([id, panHamb, 1, 'unidad', 'Pan con ajonjolí']);
+          if (carneRes) stmt.run([id, carneRes, 0.15, 'kg', 'Carne']);
+          if (quesoAmarillo) stmt.run([id, quesoAmarillo, 0.04, 'kg', 'Queso']);
+          if (papas) stmt.run([id, papas, 0.15, 'kg', 'Papas fritas']);
+        }
+      });
+
+      stmt.free();
+    } catch (e) {
+      console.warn('Error seeding initial recipes:', e);
+    }
+  }
+
+  public resetDatabase(): void {
+    safeStorage.removeItem('TerrenoBroaster_db_binary');
+    safeStorage.removeItem('tb_fallback_platos');
+    safeStorage.removeItem('tb_fallback_ventas');
+    safeStorage.removeItem('tb_fallback_detalles');
+    safeStorage.removeItem('tb_fallback_comandas');
+    safeStorage.removeItem('tb_fallback_usuarios');
+    safeStorage.removeItem('tb_fallback_pedidos_whatsapp');
+    safeStorage.removeItem('tb_whatsapp_phone');
 
     if (this.SQL) {
       this.db = new this.SQL.Database();
@@ -1973,6 +2914,10 @@ class SQLiteService {
     }
     this.initDefaultFallback();
     this.notify();
+  }
+
+  public resetToDefaults(): void {
+    this.resetDatabase();
   }
 }
 

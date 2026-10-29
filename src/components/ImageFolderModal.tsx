@@ -106,6 +106,25 @@ export const ImageFolderModal: React.FC<ImageFolderModalProps> = ({
             </label>
           </div>
 
+          {/* Sync to Server Action for QR Clients */}
+          <div className="p-3 bg-gradient-to-r from-amber-950/40 via-stone-950 to-stone-950 border border-amber-500/30 rounded-xl flex items-center justify-between">
+            <div>
+              <p className="font-bold text-amber-300 text-xs">Sincronizar Fotos con el Menú QR</p>
+              <p className="text-[11px] text-stone-400">Publica las imágenes en el servidor para que los comensales las vean en su celular</p>
+            </div>
+            <button
+              type="button"
+              onClick={async () => {
+                await imageService.syncStoredImagesToServer();
+                setSuccessCount(loadedFilenames.length);
+                setTimeout(() => setSuccessCount(null), 4000);
+              }}
+              className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-stone-950 font-black rounded-lg text-xs transition-colors shrink-0 shadow-sm"
+            >
+              Publicar Fotos
+            </button>
+          </div>
+
           {/* Currently loaded images list */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">

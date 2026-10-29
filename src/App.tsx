@@ -3,9 +3,11 @@ import { Plato, CartItem, Venta, DetalleVenta, TipoServicio, Usuario } from './t
 import { sqliteService } from './db/sqliteService';
 import { imageService } from './services/imageService';
 import { Navbar, NavTab } from './components/Navbar';
+import { Sidebar } from './components/Sidebar';
 import { POSView } from './components/POSView';
 import { ComandasMonitorView } from './components/ComandasMonitorView';
 import { PlatosView } from './components/PlatosView';
+import { InventarioView } from './components/InventarioView';
 import { HistorialVentasView } from './components/HistorialVentasView';
 import { DashboardView } from './components/DashboardView';
 import { DatabaseModal } from './components/DatabaseModal';
@@ -21,6 +23,7 @@ import { CustomerMenuView } from './components/CustomerMenuView';
 import { menuSyncService } from './services/menuSyncService';
 import { playWhatsAppIncomingAlert, playNotificationSound } from './utils/soundAlert';
 import { formatCurrency } from './utils/currency';
+import { safeStorage } from './utils/safeStorage';
 import { MessageSquare, Bell, ArrowRight, X, Truck, Package, Volume2, Settings } from 'lucide-react';
 
 interface IncomingWhatsAppAlert {
@@ -50,6 +53,25 @@ export default function App() {
 
   const [restaurantPhone, setRestaurantPhone] = useState<string>(() => sqliteService.getWhatsAppPhone());
 
+  // Sidebar Retract / Expand state (remembered across sessions)
+  const [isSidebarExpanded, setIsSidebarExpanded] = useState<boolean>(() => {
+    const saved = safeStorage.getItem('tb_sidebar_expanded');
+    return saved !== null ? saved === 'true' : true;
+  });
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
+
+  const handleToggleSidebar = () => {
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      setIsMobileSidebarOpen((prev) => !prev);
+    } else {
+      setIsSidebarExpanded((prev) => {
+        const next = !prev;
+        safeStorage.setItem('tb_sidebar_expanded', String(next));
+        return next;
+      });
+    }
+  };
+
   // Floating notification toast for newly arrived WhatsApp orders
   const [incomingAlert, setIncomingAlert] = useState<IncomingWhatsAppAlert | null>(null);
 
@@ -58,13 +80,22 @@ export default function App() {
   const isInitialLoadRef = useRef<boolean>(true);
 
   // Splash & User Authentication State
-  const [showSplash, setShowSplash] = useState<boolean>(true);
+  const [showSplash, setShowSplash] = useState<boolean>(false);
   const [currentUser, setCurrentUser] = useState<Usuario | null>(() => {
     try {
-      const saved = localStorage.getItem('tb_logged_user');
-      return saved ? JSON.parse(saved) : null;
+      const saved = safeStorage.getItem('tb_logged_user');
+      if (saved) return JSON.parse(saved);
+      return {
+        Id: 1,
+        Username: 'Administrador',
+        Role: 'Administrador',
+      };
     } catch {
-      return null;
+      return {
+        Id: 1,
+        Username: 'Administrador',
+        Role: 'Administrador',
+      };
     }
   });
   const [isLoginModalOpen, setIsLoginModalOpen] = useState<boolean>(false);
@@ -103,8 +134,10 @@ export default function App() {
       setPlatos(initialPlatos);
       setRestaurantPhone(initialPhone);
 
-      // Force push active database dishes to backend server so customer QR code shows live dishes
-      menuSyncService.pushMenuToServer(initialPlatos, initialPhone, true);
+      // Push active database dishes to backend server so customer QR code shows live dishes
+      if (initialPlatos && initialPlatos.length > 0) {
+        menuSyncService.pushMenuToServer(initialPlatos, initialPhone, true);
+      }
 
       const comandas = sqliteService.getComandas();
       const active = comandas.filter((c) => c.Estado === 'Cocina' || c.Estado === 'Entregado').length;
@@ -126,7 +159,9 @@ export default function App() {
       setRestaurantPhone(livePhone);
 
       // Keep server menu in sync whenever SQLite database is updated
-      menuSyncService.pushMenuToServer(livePlatos, livePhone);
+      if (livePlatos && livePlatos.length > 0) {
+        menuSyncService.pushMenuToServer(livePlatos, livePhone);
+      }
 
       const comandas = sqliteService.getComandas();
       const active = comandas.filter((c) => c.Estado === 'Cocina' || c.Estado === 'Entregado').length;
@@ -272,13 +307,13 @@ export default function App() {
 
   const handleLoginSuccess = (user: Usuario) => {
     setCurrentUser(user);
-    localStorage.setItem('tb_logged_user', JSON.stringify(user));
+    safeStorage.setItem('tb_logged_user', JSON.stringify(user));
     setIsLoginModalOpen(false);
   };
 
   const handleLogout = () => {
     setCurrentUser(null);
-    localStorage.removeItem('tb_logged_user');
+    safeStorage.removeItem('tb_logged_user');
     setIsLoginModalOpen(true);
   };
 
@@ -311,22 +346,50 @@ export default function App() {
       <Navbar
         currentTab={currentTab}
         onTabChange={setCurrentTab}
-        onOpenDbModal={() => setIsDbModalOpen(true)}
-        onOpenGithubModal={() => setIsGithubModalOpen(true)}
-        onOpenImageModal={() => setIsImageModalOpen(true)}
-        onOpenWhatsAppModal={() => setIsWhatsAppModalOpen(true)}
-        onOpenAlertSettingsModal={() => setIsAlertSettingsModalOpen(true)}
-        onOpenCustomerMenu={() => setIsCustomerMenuMode(true)}
+        onToggleSidebar={handleToggleSidebar}
+        isSidebarExpanded={isSidebarExpanded}
         onOpenQrModal={() => setIsDirectQrModalOpen(true)}
+        onOpenWhatsAppModal={() => setIsWhatsAppModalOpen(true)}
         onOpenLoginModal={() => setIsLoginModalOpen(true)}
-        onShowSplash={() => setShowSplash(true)}
         onLogout={handleLogout}
         currentUser={currentUser}
-        cartCount={cartTotalItems}
-        totalPlatosCount={platos.length}
-        activeComandasCount={activeComandasCount}
         pendingWhatsAppCount={pendingWhatsAppCount}
+        activeComandasCount={activeComandasCount}
       />
+
+      {/* Main Body Layout: Collapsible Categorized Sidebar + Content */}
+      <div className="flex-1 flex overflow-hidden relative">
+        <Sidebar
+          currentTab={currentTab}
+          onTabChange={setCurrentTab}
+          isExpanded={isSidebarExpanded}
+          onToggleExpanded={() => {
+            setIsSidebarExpanded((prev) => {
+              const next = !prev;
+              safeStorage.setItem('tb_sidebar_expanded', String(next));
+              return next;
+            });
+          }}
+          isMobileOpen={isMobileSidebarOpen}
+          onCloseMobile={() => setIsMobileSidebarOpen(false)}
+          onOpenDbModal={() => setIsDbModalOpen(true)}
+          onOpenGithubModal={() => setIsGithubModalOpen(true)}
+          onOpenImageModal={() => setIsImageModalOpen(true)}
+          onOpenWhatsAppModal={() => setIsWhatsAppModalOpen(true)}
+          onOpenAlertSettingsModal={() => setIsAlertSettingsModalOpen(true)}
+          onOpenCustomerMenu={() => window.open('/cliente', '_blank')}
+          onOpenQrModal={() => setIsDirectQrModalOpen(true)}
+          onOpenLoginModal={() => setIsLoginModalOpen(true)}
+          onShowSplash={() => setShowSplash(true)}
+          onLogout={handleLogout}
+          currentUser={currentUser}
+          cartCount={cartTotalItems}
+          totalPlatosCount={platos.length}
+          activeComandasCount={activeComandasCount}
+          pendingWhatsAppCount={pendingWhatsAppCount}
+        />
+
+        <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
 
       {/* PERSISTENT ATTENTION BANNER WHEN THERE ARE PENDING WHATSAPP ORDERS */}
       {pendingWhatsAppCount > 0 && (
@@ -515,6 +578,12 @@ export default function App() {
           />
         )}
 
+        {currentTab === 'inventario' && (
+          <InventarioView
+            onRefreshPlatos={() => setPlatos(sqliteService.getPlatos())}
+          />
+        )}
+
         {currentTab === 'historial' && (
           <HistorialVentasView />
         )}
@@ -523,6 +592,8 @@ export default function App() {
           <DashboardView />
         )}
       </main>
+        </div>
+      </div>
 
       {/* Splash Screen (Animated 30s entrance or on demand) */}
       {showSplash && (
@@ -594,7 +665,7 @@ export default function App() {
         }}
         onOpenCustomerMenu={() => {
           setIsDirectQrModalOpen(false);
-          setIsCustomerMenuMode(true);
+          window.open('/cliente', '_blank');
         }}
       />
 

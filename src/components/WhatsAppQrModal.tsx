@@ -253,21 +253,22 @@ export const WhatsAppQrModal: React.FC<WhatsAppQrModalProps> = ({
               </div>
             </div>
 
-            {/* Test Links */}
-            <div className="flex items-center space-x-2">
-              {onOpenCustomerMenu && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    onClose();
-                    onOpenCustomerMenu();
-                  }}
-                  className="flex items-center space-x-1.5 px-3 py-1.5 bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700 rounded-lg text-xs font-semibold transition-colors"
-                >
-                  <Smartphone className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Abrir Menú Móvil</span>
-                </button>
-              )}
+            {/* Test Links & Platos Info */}
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="px-2.5 py-1 rounded-lg bg-emerald-950/70 border border-emerald-500/30 text-emerald-300 text-[11px] font-bold flex items-center space-x-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span>{activePlatos.length} platos de la tabla 'Platos' listos</span>
+              </span>
+
+              <button
+                type="button"
+                onClick={() => window.open(targetUrl || '/cliente', '_blank')}
+                className="flex items-center space-x-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-stone-950 rounded-lg text-xs font-black transition-all shadow-sm active:scale-95"
+                title="Abrir la aplicación dedicada de clientes en una nueva pestaña"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                <span>Abrir App de Clientes</span>
+              </button>
             </div>
           </div>
 

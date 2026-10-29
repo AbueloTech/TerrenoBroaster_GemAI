@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Plato } from '../types';
 import { imageService } from '../services/imageService';
 import { sqliteService } from '../db/sqliteService';
+import { menuSyncService } from '../services/menuSyncService';
 import { formatPrice, safeParsePrice } from '../utils/currency';
 import {
   Plus,
@@ -17,7 +18,10 @@ import {
   AlertTriangle,
   FolderOpen,
   LayoutGrid,
-  Table as TableIcon
+  Table as TableIcon,
+  Sparkles,
+  CheckCircle2,
+  FolderPlus
 } from 'lucide-react';
 
 interface PlatosViewProps {
@@ -35,6 +39,20 @@ export const PlatosView: React.FC<PlatosViewProps> = ({ platos, onRefresh, onOpe
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingPlato, setEditingPlato] = useState<Plato | null>(null);
   const [deleteConfirmPlato, setDeleteConfirmPlato] = useState<Plato | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [feedbackToast, setFeedbackToast] = useState<string | null>(null);
+
+  // Dynamic categories from actual database dishes
+  const availableCategories = useMemo(() => {
+    const set = new Set<string>();
+    platos.forEach((p) => {
+      const cat = p.Categoria ? p.Categoria.trim() : '';
+      if (cat) set.add(cat);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [platos]);
+
+  const categories = ['Todos', ...availableCategories];
 
   // Form states
   const [formData, setFormData] = useState<{
@@ -45,13 +63,13 @@ export const PlatosView: React.FC<PlatosViewProps> = ({ platos, onRefresh, onOpe
   }>({
     Plato: '',
     Precio: '',
-    Categoria: 'Pollo Broaster',
+    Categoria: 'Pollo',
     Imagen: '',
   });
 
+  const [isCreatingNewCategory, setIsCreatingNewCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
   const [formImagePreview, setFormImagePreview] = useState<string>('');
-
-  const categories = ['Todos', ...Array.from(new Set(platos.map((p) => p.Categoria)))];
 
   const filteredPlatos = platos.filter((p) => {
     const matchesCat = categoryFilter === 'Todos' || p.Categoria === categoryFilter;
@@ -64,12 +82,15 @@ export const PlatosView: React.FC<PlatosViewProps> = ({ platos, onRefresh, onOpe
 
   const openCreateModal = () => {
     setEditingPlato(null);
+    const defaultCat = availableCategories[0] || 'Pollo';
     setFormData({
       Plato: '',
       Precio: '',
-      Categoria: 'Pollo Broaster',
+      Categoria: defaultCat,
       Imagen: '',
     });
+    setIsCreatingNewCategory(false);
+    setNewCategoryName('');
     setFormImagePreview('');
     setIsModalOpen(true);
   };
@@ -82,11 +103,13 @@ export const PlatosView: React.FC<PlatosViewProps> = ({ platos, onRefresh, onOpe
       Categoria: plato.Categoria,
       Imagen: plato.Imagen,
     });
-    setFormImagePreview(imageService.getImageUrl(plato.Imagen, plato.Categoria));
+    setIsCreatingNewCategory(false);
+    setNewCategoryName('');
+    setFormImagePreview(imageService.getImageUrl(plato.Imagen, plato.Categoria, plato.ID, plato.Plato));
     setIsModalOpen(true);
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.Plato.trim() || !formData.Precio) {
       alert('Por favor complete el nombre del plato y el precio.');
@@ -99,32 +122,67 @@ export const PlatosView: React.FC<PlatosViewProps> = ({ platos, onRefresh, onOpe
       return;
     }
 
-    if (editingPlato) {
-      sqliteService.updatePlato({
-        ID: editingPlato.ID,
-        Plato: formData.Plato.trim(),
-        Precio: precioNum,
-        Categoria: formData.Categoria.trim() || 'General',
-        Imagen: formData.Imagen.trim(),
-      });
-    } else {
-      sqliteService.addPlato({
-        Plato: formData.Plato.trim(),
-        Precio: precioNum,
-        Categoria: formData.Categoria.trim() || 'General',
-        Imagen: formData.Imagen.trim(),
-      });
-    }
+    const finalCategory = isCreatingNewCategory
+      ? (newCategoryName.trim() || 'General')
+      : (formData.Categoria.trim() || 'General');
 
-    setIsModalOpen(false);
-    onRefresh();
+    setIsSaving(true);
+    try {
+      if (editingPlato) {
+        sqliteService.updatePlato({
+          ID: editingPlato.ID,
+          Plato: formData.Plato.trim(),
+          Precio: precioNum,
+          Categoria: finalCategory,
+          Imagen: formData.Imagen.trim(),
+        });
+      } else {
+        sqliteService.addPlato({
+          Plato: formData.Plato.trim(),
+          Precio: precioNum,
+          Categoria: finalCategory,
+          Imagen: formData.Imagen.trim(),
+        });
+      }
+
+      // Explicitly persist database file to server disk (.data/TerrenoBroaster.db)
+      await sqliteService.uploadDatabaseToServer();
+
+      // Push updated catalog to customer online menu API
+      const livePlatos = sqliteService.getPlatos();
+      const livePhone = sqliteService.getWhatsAppPhone();
+      await menuSyncService.pushMenuToServer(livePlatos, livePhone, true);
+
+      setIsModalOpen(false);
+      setFeedbackToast(
+        editingPlato
+          ? `Plato "${formData.Plato.trim()}" actualizado y guardado permanentemente en la base de datos.`
+          : `Plato "${formData.Plato.trim()}" creado y guardado permanentemente en la base de datos y menú digital.`
+      );
+      setTimeout(() => setFeedbackToast(null), 4000);
+      onRefresh();
+    } catch (err: any) {
+      alert('Error guardando plato: ' + err.message);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!deleteConfirmPlato) return;
-    sqliteService.deletePlato(deleteConfirmPlato.ID);
-    setDeleteConfirmPlato(null);
-    onRefresh();
+    try {
+      sqliteService.deletePlato(deleteConfirmPlato.ID);
+      await sqliteService.uploadDatabaseToServer();
+      const livePlatos = sqliteService.getPlatos();
+      const livePhone = sqliteService.getWhatsAppPhone();
+      await menuSyncService.pushMenuToServer(livePlatos, livePhone, true);
+      setDeleteConfirmPlato(null);
+      setFeedbackToast(`Plato eliminado exitosamente de la base de datos.`);
+      setTimeout(() => setFeedbackToast(null), 3000);
+      onRefresh();
+    } catch (err: any) {
+      alert('Error eliminando plato: ' + err.message);
+    }
   };
 
   // Upload an image file for this plato
@@ -140,6 +198,20 @@ export const PlatosView: React.FC<PlatosViewProps> = ({ platos, onRefresh, onOpe
   return (
     <div className="flex-1 overflow-y-auto bg-stone-950 p-4 sm:p-6 lg:p-8 space-y-6">
       
+      {/* Real-time persistence Feedback Toast */}
+      {feedbackToast && (
+        <div className="p-3.5 bg-emerald-950/90 border border-emerald-500/50 rounded-2xl flex items-center space-x-3 text-emerald-200 text-xs shadow-lg animate-in fade-in duration-200">
+          <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+          <span className="font-semibold flex-1">{feedbackToast}</span>
+          <button
+            onClick={() => setFeedbackToast(null)}
+            className="text-emerald-400 hover:text-white"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* Top Header & Breadcrumb */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-stone-800">
         <div>
@@ -150,7 +222,7 @@ export const PlatosView: React.FC<PlatosViewProps> = ({ platos, onRefresh, onOpe
             </span>
           </h1>
           <p className="text-xs text-stone-400 mt-1">
-            Administre los platos del restaurante en SQLite ('TerrenoBroaster.db'). Fotos en carpeta local <code className="text-amber-300 font-mono">img\</code>.
+            Administre los platos del restaurante en SQLite ('TerrenoBroaster.db'). Sincronizado permanentemente en disco y menú digital.
           </p>
         </div>
 
@@ -242,7 +314,7 @@ export const PlatosView: React.FC<PlatosViewProps> = ({ platos, onRefresh, onOpe
               </thead>
               <tbody className="divide-y divide-stone-800/80">
                 {filteredPlatos.map((plato) => {
-                  const imgUrl = imageService.getImageUrl(plato.Imagen, plato.Categoria);
+                  const imgUrl = imageService.getImageUrl(plato.Imagen, plato.Categoria, plato.Plato, plato.ID);
                   return (
                     <tr key={plato.ID} className="hover:bg-stone-800/50 transition-colors">
                       <td className="py-3 px-4 font-mono font-bold text-amber-500">#{plato.ID}</td>
@@ -403,19 +475,70 @@ export const PlatosView: React.FC<PlatosViewProps> = ({ platos, onRefresh, onOpe
                 </div>
 
                 <div>
-                  <label className="block text-stone-300 font-semibold mb-1">Categoría:</label>
-                  <select
-                    value={formData.Categoria}
-                    onChange={(e) => setFormData({ ...formData, Categoria: e.target.value })}
-                    className="w-full py-2.5 px-3 bg-stone-950 border border-stone-700 rounded-xl text-stone-100 focus:outline-none focus:border-amber-500"
-                  >
-                    <option value="Pollo Broaster">Pollo Broaster</option>
-                    <option value="Hamburguesas">Hamburguesas</option>
-                    <option value="Raciones">Raciones</option>
-                    <option value="Bebidas">Bebidas</option>
-                    <option value="Combos">Combos</option>
-                    <option value="Postres">Postres</option>
-                  </select>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-stone-300 font-semibold">Categoría:</label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsCreatingNewCategory(!isCreatingNewCategory);
+                        if (!isCreatingNewCategory) {
+                          setNewCategoryName('');
+                        }
+                      }}
+                      className="text-[11px] text-amber-400 hover:text-amber-300 font-bold transition-colors cursor-pointer flex items-center space-x-1"
+                    >
+                      {isCreatingNewCategory ? (
+                        <span>← Elegir existente</span>
+                      ) : (
+                        <span>+ Nueva Categoría</span>
+                      )}
+                    </button>
+                  </div>
+
+                  {isCreatingNewCategory ? (
+                    <div>
+                      <input
+                        type="text"
+                        autoFocus
+                        required
+                        value={newCategoryName}
+                        onChange={(e) => setNewCategoryName(e.target.value)}
+                        placeholder="Escriba nueva categoría (ej: Pizzas, Pastas...)"
+                        className="w-full py-2.5 px-3 bg-stone-950 border-2 border-amber-500 rounded-xl text-stone-100 placeholder:text-stone-500 focus:outline-none focus:ring-1 focus:ring-amber-500 font-semibold"
+                      />
+                      <p className="text-[10px] text-amber-400 mt-1">
+                        Se guardará esta nueva categoría en la base de datos para este plato.
+                      </p>
+                    </div>
+                  ) : (
+                    <div>
+                      <select
+                        value={formData.Categoria}
+                        onChange={(e) => {
+                          if (e.target.value === '__NEW__') {
+                            setIsCreatingNewCategory(true);
+                            setNewCategoryName('');
+                          } else {
+                            setFormData({ ...formData, Categoria: e.target.value });
+                          }
+                        }}
+                        className="w-full py-2.5 px-3 bg-stone-950 border border-stone-700 rounded-xl text-stone-100 font-medium focus:outline-none focus:border-amber-500"
+                      >
+                        {/* If current value is not in available categories, include it so it doesn't get lost */}
+                        {formData.Categoria && !availableCategories.includes(formData.Categoria) && (
+                          <option value={formData.Categoria}>{formData.Categoria}</option>
+                        )}
+                        {availableCategories.map((cat) => (
+                          <option key={cat} value={cat}>
+                            {cat}
+                          </option>
+                        ))}
+                        <option value="__NEW__" className="text-amber-400 font-bold">
+                          + Escribir Nueva Categoría...
+                        </option>
+                      </select>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -431,9 +554,9 @@ export const PlatosView: React.FC<PlatosViewProps> = ({ platos, onRefresh, onOpe
                     onChange={(e) => {
                       const val = e.target.value;
                       setFormData({ ...formData, Imagen: val });
-                      setFormImagePreview(imageService.getImageUrl(val, formData.Categoria));
+                      setFormImagePreview(imageService.getImageUrl(val, formData.Categoria, editingPlato?.ID, formData.Plato));
                     }}
-                    placeholder="ej: combo_broaster.jpg"
+                    placeholder="ej: combo_broaster.jpg o broaster1.jpg"
                     className="flex-1 py-2 px-3 bg-stone-950 border border-stone-700 rounded-xl text-stone-100 font-mono text-xs focus:outline-none focus:border-amber-500"
                   />
                   <label className="px-3 py-2 bg-stone-800 hover:bg-stone-700 text-stone-200 rounded-xl border border-stone-700 cursor-pointer flex items-center space-x-1.5 transition-colors">
@@ -472,15 +595,18 @@ export const PlatosView: React.FC<PlatosViewProps> = ({ platos, onRefresh, onOpe
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2.5 bg-stone-800 hover:bg-stone-700 text-stone-300 font-semibold rounded-xl"
+                  disabled={isSaving}
+                  className="px-4 py-2.5 bg-stone-800 hover:bg-stone-700 text-stone-300 font-semibold rounded-xl disabled:opacity-50"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-stone-950 font-black rounded-xl shadow-lg shadow-amber-500/20"
+                  disabled={isSaving}
+                  className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-stone-950 font-black rounded-xl shadow-lg shadow-amber-500/20 disabled:opacity-50 flex items-center space-x-2"
                 >
-                  {editingPlato ? 'Guardar Cambios' : 'Crear Plato'}
+                  {isSaving && <Sparkles className="w-4 h-4 animate-spin text-stone-950" />}
+                  <span>{editingPlato ? 'Guardar Cambios' : 'Crear Plato'}</span>
                 </button>
               </div>
 

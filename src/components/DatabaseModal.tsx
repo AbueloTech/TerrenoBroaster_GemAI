@@ -99,11 +99,11 @@ export const DatabaseModal: React.FC<DatabaseModalProps> = ({ isOpen, onClose, o
   };
 
   const handleReset = () => {
-    if (window.confirm('¿Desea restablecer la base de datos a los platos y ventas de demostración por defecto?')) {
+    if (window.confirm('¿Desea limpiar la base de datos local para importar un nuevo archivo TerrenoBroaster.db?')) {
       sqliteService.resetToDefaults();
       setDbStatus(sqliteService.getConnectionStatus());
       onDbUpdated();
-      setSuccessMessage('Base de datos restablecida a los valores iniciales.');
+      setSuccessMessage('Base de datos restablecida. Puede importar su archivo TerrenoBroaster.db.');
       setTimeout(() => setSuccessMessage(null), 4000);
     }
   };
@@ -230,6 +230,53 @@ export const DatabaseModal: React.FC<DatabaseModalProps> = ({ isOpen, onClose, o
               </button>
             </div>
 
+          </div>
+
+          {/* Sincronización QR en Vivo */}
+          <div className="p-3.5 bg-gradient-to-r from-amber-950/40 via-stone-950 to-stone-950 border border-amber-500/30 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h4 className="font-bold text-amber-300 text-xs flex items-center space-x-1.5">
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Menú de Clientes QR (Catálogo en Línea)</span>
+              </h4>
+              <p className="text-[11px] text-stone-400 mt-0.5">
+                Publica los <strong className="text-white">{dbStatus.platosCount} platos</strong> de la tabla <code className="text-amber-300 font-mono">Platos</code> para que los clientes que escaneen el código QR vean exactamente estos productos.
+              </p>
+            </div>
+
+            <div className="flex items-center space-x-2 shrink-0">
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    setIsProcessing(true);
+                    const currentPlatos = sqliteService.getPlatos();
+                    const currentPhone = sqliteService.getWhatsAppPhone();
+                    await menuSyncService.pushMenuToServer(currentPlatos, currentPhone, true);
+                    setSuccessMessage(`¡Catálogo publicado! ${currentPlatos.length} platos sincronizados para los clientes QR.`);
+                    setTimeout(() => setSuccessMessage(null), 5000);
+                  } catch (err: any) {
+                    alert('Error publicando menú: ' + err.message);
+                  } finally {
+                    setIsProcessing(false);
+                  }
+                }}
+                disabled={isProcessing}
+                className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-stone-950 rounded-lg text-xs font-black shadow-md shadow-amber-500/20 transition-all flex items-center space-x-1"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isProcessing ? 'animate-spin' : ''}`} />
+                <span>Publicar Catálogo QR</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => window.open('/cliente', '_blank')}
+                className="px-3 py-1.5 bg-stone-800 hover:bg-stone-700 text-stone-200 rounded-lg text-xs font-semibold border border-stone-700 transition-colors"
+                title="Abrir la app de clientes en una pestaña nueva"
+              >
+                <span>Ver App</span>
+              </button>
+            </div>
           </div>
 
           {/* SQL Console */}

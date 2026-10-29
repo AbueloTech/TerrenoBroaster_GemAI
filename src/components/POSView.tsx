@@ -125,14 +125,17 @@ export const POSView: React.FC<POSViewProps> = ({
   }, [tipoServicio, ubicacionMesa]);
 
   // Categories extraction
-  const categories = ['Todos', ...Array.from(new Set(platos.map((p) => p.Categoria)))];
+  const categories = ['Todos', ...Array.from(new Set((platos || []).map((p) => p?.Categoria || 'General')))];
 
   // Filtering
-  const filteredPlatos = platos.filter((plato) => {
-    const matchesCategory = selectedCategory === 'Todos' || plato.Categoria === selectedCategory;
+  const filteredPlatos = (platos || []).filter((plato) => {
+    if (!plato || !plato.Plato) return false;
+    const cat = plato.Categoria || 'General';
+    const matchesCategory = selectedCategory === 'Todos' || cat === selectedCategory;
+    const searchLower = (searchTerm || '').toLowerCase();
     const matchesSearch =
-      plato.Plato.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      plato.Categoria.toLowerCase().includes(searchTerm.toLowerCase());
+      (plato.Plato || '').toLowerCase().includes(searchLower) ||
+      cat.toLowerCase().includes(searchLower);
     return matchesCategory && matchesSearch;
   });
 
@@ -472,7 +475,19 @@ export const POSView: React.FC<POSViewProps> = ({
 
         {/* Dishes Grid */}
         <div className="flex-1 overflow-y-auto p-4 scrollbar-thin">
-          {filteredPlatos.length === 0 ? (
+          {platos.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-80 text-center max-w-md mx-auto space-y-3">
+              <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
+                <ShoppingBag className="w-7 h-7" />
+              </div>
+              <div>
+                <p className="font-bold text-stone-200 text-base">Base de datos lista para importar</p>
+                <p className="text-xs text-stone-400 mt-1.5 leading-relaxed">
+                  Para ver el catálogo auténtico de <strong className="text-amber-400">Terreno Broaster</strong>, pulse el botón <strong className="text-stone-200">"Base de Datos"</strong> en la barra superior e importe su archivo <span className="font-mono text-amber-300">TerrenoBroaster.db</span>.
+                </p>
+              </div>
+            </div>
+          ) : filteredPlatos.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-64 text-stone-400">
               <ShoppingBag className="w-12 h-12 text-stone-600 mb-2" />
               <p className="font-semibold text-sm">No se encontraron platos</p>
@@ -493,11 +508,13 @@ export const POSView: React.FC<POSViewProps> = ({
                     {/* Image thumbnail */}
                     <div className="relative aspect-[4/3] bg-stone-800 overflow-hidden">
                       <img
-                        src={imageService.getImageUrl(plato.Imagen, plato.Categoria)}
+                        src={imageService.getImageUrl(plato.Imagen, plato.Categoria, plato.Plato, plato.ID)}
                         alt={plato.Plato}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                         onError={(e) => {
-                          (e.target as HTMLImageElement).src = imageService.getFallbackForCategory(plato.Categoria);
+                          const target = e.target as HTMLImageElement;
+                          target.onerror = null;
+                          target.src = imageService.getSmartFoodImage(plato.Plato, plato.Categoria);
                         }}
                       />
                       <span className="absolute top-2 left-2 bg-stone-950/80 backdrop-blur-xs text-[10px] font-semibold text-stone-300 px-2 py-0.5 rounded-md border border-stone-700">
@@ -782,11 +799,13 @@ export const POSView: React.FC<POSViewProps> = ({
                   className="bg-stone-950/70 border border-stone-800 rounded-xl p-3 flex items-center space-x-3"
                 >
                   <img
-                    src={imageService.getImageUrl(item.plato.Imagen, item.plato.Categoria)}
+                    src={imageService.getImageUrl(item.plato.Imagen, item.plato.Categoria, item.plato.Plato, item.plato.ID)}
                     alt={item.plato.Plato}
                     className="w-12 h-12 rounded-lg object-cover bg-stone-800 shrink-0"
                     onError={(e) => {
-                      (e.target as HTMLImageElement).src = imageService.getFallbackForCategory(item.plato.Categoria);
+                      const target = e.target as HTMLImageElement;
+                      target.onerror = null;
+                      target.src = imageService.getSmartFoodImage(item.plato.Plato, item.plato.Categoria);
                     }}
                   />
                   

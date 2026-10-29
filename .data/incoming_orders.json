@@ -1,0 +1,135 @@
+[
+  {
+    "id": "ord_1793011581920_wkgom",
+    "order": {
+      "nombreCliente": "Otra vez",
+      "telefonoCliente": "3043902948",
+      "tipoEntrega": "Delivery",
+      "direccionEntrega": "Por aqui",
+      "formaPago": "Efectivo",
+      "notas": "Con todo",
+      "items": [
+        {
+          "plato": {
+            "ID": 9,
+            "Plato": "Tequeños Tradicionales de Queso (5 Und)",
+            "Precio": 4500,
+            "Categoria": "Raciones",
+            "Imagen": "tequenos_queso.jpg"
+          },
+          "cantidad": 2
+        },
+        {
+          "plato": {
+            "ID": 10,
+            "Plato": "Ensalada Cole Slaw Tradicional",
+            "Precio": 2500,
+            "Categoria": "Raciones",
+            "Imagen": "ensalada_coleslaw.jpg"
+          },
+          "cantidad": 1
+        }
+      ],
+      "total": 11500
+    },
+    "receivedAt": "2026-10-26T10:46:21.920Z",
+    "processed": true
+  },
+  {
+    "id": "ord_1793011701280_60zpf",
+    "order": {
+      "nombreCliente": "Otra vez",
+      "telefonoCliente": "3043902948",
+      "tipoEntrega": "Delivery",
+      "direccionEntrega": "Por aqui",
+      "formaPago": "Efectivo",
+      "notas": "Con todo",
+      "items": [
+        {
+          "plato": {
+            "ID": 9,
+            "Plato": "Tequeños Tradicionales de Queso (5 Und)",
+            "Precio": 4500,
+            "Categoria": "Raciones",
+            "Imagen": "tequenos_queso.jpg"
+          },
+          "cantidad": 2
+        },
+        {
+          "plato": {
+            "ID": 10,
+            "Plato": "Ensalada Cole Slaw Tradicional",
+            "Precio": 2500,
+            "Categoria": "Raciones",
+            "Imagen": "ensalada_coleslaw.jpg"
+          },
+          "cantidad": 1
+        }
+      ],
+      "total": 11500
+    },
+    "receivedAt": "2026-10-26T10:48:21.280Z",
+    "processed": true
+  },
+  {
+    "id": "ord_1793011735604_mutcf",
+    "order": {
+      "nombreCliente": "Otra vez",
+      "telefonoCliente": "3043902948",
+      "tipoEntrega": "Delivery",
+      "direccionEntrega": "Por aqui",
+      "formaPago": "Efectivo",
+      "notas": "Con todo",
+      "items": [
+        {
+          "plato": {
+            "ID": 9,
+            "Plato": "Tequeños Tradicionales de Queso (5 Und)",
+            "Precio": 4500,
+            "Categoria": "Raciones",
+            "Imagen": "tequenos_queso.jpg"
+          },
+          "cantidad": 2
+        },
+        {
+          "plato": {
+            "ID": 10,
+            "Plato": "Ensalada Cole Slaw Tradicional",
+            "Precio": 2500,
+            "Categoria": "Raciones",
+            "Imagen": "ensalada_coleslaw.jpg"
+          },
+          "cantidad": 1
+        }
+      ],
+      "total": 11500
+    },
+    "receivedAt": "2026-10-26T10:48:55.604Z",
+    "processed": true
+  },
+  {
+    "id": "ord_1793014976988_ardq1",
+    "order": {
+      "nombreCliente": "Cliente Prueba",
+      "telefonoCliente": "+584120000000",
+      "tipoEntrega": "Delivery",
+      "direccionEntrega": "Av Principal #10",
+      "items": [
+        {
+          "plato": {
+            "ID": 1,
+            "Plato": "Pollo Terreno Real",
+            "Precio": 6000,
+            "Categoria": "Pollo",
+            "Imagen": ""
+          },
+          "cantidad": 2
+        }
+      ],
+      "total": 12000,
+      "formaPago": "Efectivo"
+    },
+    "receivedAt": "2026-10-26T11:42:56.988Z",
+    "processed": true
+  }
+]

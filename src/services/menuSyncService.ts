@@ -1,5 +1,6 @@
 import { Plato, PedidoWhatsApp, PedidoWhatsAppItem } from '../types';
 import { DigitalMenuOrderPayload } from '../utils/whatsappParser';
+import { imageService } from './imageService';
 
 export interface SyncedMenuResponse {
   success: boolean;
@@ -8,6 +9,7 @@ export interface SyncedMenuResponse {
     restaurantPhone: string;
     updatedAt: string;
   };
+  availableImages?: string[];
 }
 
 class MenuSyncService {
@@ -21,8 +23,8 @@ class MenuSyncService {
   public async pushMenuToServer(platos: Plato[], restaurantPhone: string, force = false): Promise<boolean> {
     if (!Array.isArray(platos) || platos.length === 0) return false;
 
-    // Build signature representing all dishes (IDs, names, prices) and phone
-    const signature = `${platos.length}|` + platos.map((p) => `${p.ID}:${p.Plato}:${p.Precio}`).join(';') + `|${restaurantPhone}`;
+    // Build signature representing all dishes (IDs, names, prices, categories, images) and phone
+    const signature = `${platos.length}|` + platos.map((p) => `${p.ID}:${p.Plato}:${p.Precio}:${p.Categoria || ''}:${p.Imagen || ''}`).join(';') + `|${restaurantPhone}`;
     if (!force && signature === this.lastPushedJson && !this.isPushing) {
       return true;
     }
@@ -61,6 +63,9 @@ class MenuSyncService {
       });
       if (!res.ok) return null;
       const data: SyncedMenuResponse = await res.json();
+      if (data.availableImages && Array.isArray(data.availableImages)) {
+        imageService.setServerImages(data.availableImages);
+      }
       if (data.success && data.menu && Array.isArray(data.menu.platos) && data.menu.platos.length > 0) {
         return {
           platos: data.menu.platos,
