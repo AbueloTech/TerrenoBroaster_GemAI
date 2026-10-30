@@ -105,6 +105,7 @@ function mountApp() {
         {isCustomerPortal() ? <CustomerApp /> : <App />}
       </ErrorBoundary>
     );
+    (window as any).__tb_app_mounted = true;
   } catch (err: any) {
     console.error('Fatal initialization error in main.tsx:', err);
     if (typeof (window as any).showStartupDiagnostic === 'function') {

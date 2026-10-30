@@ -73,11 +73,11 @@ export const ComandasMonitorView: React.FC<ComandasMonitorViewProps> = ({
   const [anulandoComanda, setAnulandoComanda] = useState<Comanda | null>(null);
   const [motivoAnulacion, setMotivoAnulacion] = useState<string>('');
 
-  // Time ticker for elapsed order times
+  // Live ticker for cooking orders timer - ticks every second
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
 
   useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 15000);
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
 
@@ -120,22 +120,71 @@ export const ComandasMonitorView: React.FC<ComandasMonitorViewProps> = ({
     return true;
   });
 
-  // Calculate elapsed minutes
-  const getElapsedMinutes = (horaCreacion: string, fechaStr?: string) => {
-    if (!horaCreacion) return 0;
+  // Calculate elapsed time in seconds for active cooking timer
+  const getElapsedSeconds = (horaCreacion: string, fechaStr?: string): number => {
+    if (!horaCreacion && !fechaStr) return 0;
     try {
-      const parts = horaCreacion.split(':');
-      const h = parseInt(parts[0], 10);
-      const m = parseInt(parts[1], 10);
-      const created = new Date();
-      created.setHours(h, m, 0, 0);
+      // 1. If horaCreacion has full ISO format
+      if (horaCreacion && horaCreacion.includes('T')) {
+        const parsedIso = Date.parse(horaCreacion);
+        if (!isNaN(parsedIso)) {
+          return Math.max(0, Math.floor((currentTime.getTime() - parsedIso) / 1000));
+        }
+      }
 
-      const diffMs = currentTime.getTime() - created.getTime();
-      const mins = Math.max(0, Math.floor(diffMs / 60000));
-      return mins;
+      // 2. If fechaStr has full ISO or datetime 'YYYY-MM-DD HH:mm:ss'
+      if (fechaStr && fechaStr.includes(':')) {
+        const parsedDt = Date.parse(fechaStr.replace(' ', 'T'));
+        if (!isNaN(parsedDt)) {
+          return Math.max(0, Math.floor((currentTime.getTime() - parsedDt) / 1000));
+        }
+      }
+
+      // 3. Parse time components (HH:mm or HH:mm:ss)
+      const cleanTime = (horaCreacion || '').trim();
+      const timeParts = cleanTime.split(':').map((p) => parseInt(p, 10));
+      if (timeParts.length >= 2 && !isNaN(timeParts[0]) && !isNaN(timeParts[1])) {
+        const h = timeParts[0];
+        const m = timeParts[1];
+        const s = timeParts[2] && !isNaN(timeParts[2]) ? timeParts[2] : 0;
+
+        const orderDate = new Date(currentTime);
+        if (fechaStr && fechaStr.includes('-')) {
+          const dateOnly = fechaStr.split(' ')[0];
+          const dp = dateOnly.split('-').map(Number);
+          if (dp.length === 3 && dp[0] > 2000) {
+            orderDate.setFullYear(dp[0], dp[1] - 1, dp[2]);
+          }
+        }
+
+        orderDate.setHours(h, m, s, 0);
+        let diffMs = currentTime.getTime() - orderDate.getTime();
+
+        // If diffMs is negative due to UTC vs Local Time differences, compensate
+        if (diffMs < 0) {
+          const tzDiff = currentTime.getTimezoneOffset() * 60 * 1000;
+          if (diffMs + tzDiff >= 0) {
+            diffMs += tzDiff;
+          } else if (diffMs - tzDiff >= 0) {
+            diffMs -= tzDiff;
+          } else {
+            diffMs = 0;
+          }
+        }
+
+        return Math.max(0, Math.floor(diffMs / 1000));
+      }
+
+      return 0;
     } catch {
       return 0;
     }
+  };
+
+  const formatTimer = (totalSecs: number): string => {
+    const mins = Math.floor(totalSecs / 60);
+    const secs = totalSecs % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')} min`;
   };
 
   // Status transitions
@@ -477,7 +526,8 @@ export const ComandasMonitorView: React.FC<ComandasMonitorViewProps> = ({
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {filteredComandas.map((comanda) => {
-                  const elapsedMins = getElapsedMinutes(comanda.HoraCreacion, comanda.Fecha);
+                  const elapsedSeconds = getElapsedSeconds(comanda.HoraCreacion, comanda.Fecha);
+                  const elapsedMins = Math.floor(elapsedSeconds / 60);
                   const isDelayedInKitchen = comanda.Estado === 'Cocina' && elapsedMins >= 15;
                   const detalles = sqliteService.getDetallesByTicket(comanda.NTicket);
 
@@ -510,14 +560,15 @@ export const ComandasMonitorView: React.FC<ComandasMonitorViewProps> = ({
                         <div className="flex items-center space-x-2">
                           {comanda.Estado === 'Cocina' && (
                             <span
-                              className={`text-[11px] font-semibold flex items-center space-x-1 px-2 py-0.5 rounded-full ${
+                              className={`text-xs font-mono font-bold flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full shadow-sm transition-all ${
                                 isDelayedInKitchen
-                                  ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 font-bold'
-                                  : 'bg-stone-800 text-stone-300'
+                                  ? 'bg-rose-500/20 text-rose-300 border border-rose-500/50 animate-pulse font-extrabold'
+                                  : 'bg-amber-500/15 text-amber-300 border border-amber-500/40'
                               }`}
+                              title={`Tiempo transcurrido en cocina: ${formatTimer(elapsedSeconds)} (Iniciado: ${comanda.HoraCreacion})`}
                             >
-                              <Clock className="w-3 h-3" />
-                              <span>{elapsedMins} min</span>
+                              <Clock className="w-3.5 h-3.5 text-amber-400 animate-spin" style={{ animationDuration: '6s' }} />
+                              <span>{formatTimer(elapsedSeconds)}</span>
                             </span>
                           )}
                           {getEstadoBadge(comanda.Estado)}
@@ -763,9 +814,17 @@ export const ComandasMonitorView: React.FC<ComandasMonitorViewProps> = ({
                               <span className="font-mono font-bold text-amber-400">
                                 {activeComanda.NTicket}
                               </span>
-                              <span className="text-[10px] text-stone-400">
-                                {activeComanda.HoraCreacion}
-                              </span>
+                              <div className="flex items-center space-x-1.5">
+                                {activeComanda.Estado === 'Cocina' && (
+                                  <span className="text-[10px] font-mono font-bold text-amber-300 bg-amber-500/15 px-1.5 py-0.5 rounded border border-amber-500/30 flex items-center space-x-1">
+                                    <Clock className="w-2.5 h-2.5 text-amber-400" />
+                                    <span>{formatTimer(getElapsedSeconds(activeComanda.HoraCreacion, activeComanda.Fecha))}</span>
+                                  </span>
+                                )}
+                                <span className="text-[10px] text-stone-400">
+                                  {activeComanda.HoraCreacion}
+                                </span>
+                              </div>
                             </div>
 
                             <p className="text-xs text-stone-300 font-medium truncate mt-0.5">

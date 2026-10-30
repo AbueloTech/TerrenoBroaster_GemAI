@@ -1064,6 +1064,28 @@ class SQLiteService {
       }
     }
 
+    // Bidirectional Sync: Keep PedidosWhatsApp in sync with Kitchen & POS Comandas
+    let waEstado: EstadoPedidoWhatsApp = 'En Cocina';
+    if (nuevoEstado === 'Cocina') waEstado = 'En Cocina';
+    else if (nuevoEstado === 'Entregado') waEstado = 'Entregado';
+    else if (nuevoEstado === 'Cobrado') waEstado = 'Cobrado';
+    else if (nuevoEstado === 'Anulado') waEstado = 'Anulado';
+
+    if (this.db) {
+      try {
+        const stmtWa = this.db.prepare('UPDATE PedidosWhatsApp SET Estado = ? WHERE NTicket = ?');
+        stmtWa.run([waEstado, nTicket]);
+        stmtWa.free();
+      } catch (err) {
+        console.error('Error syncing comanda status to PedidosWhatsApp:', err);
+      }
+    }
+
+    const matchedWa = this.fallbackPedidosWhatsApp.filter((p) => p.NTicket === nTicket);
+    matchedWa.forEach((p) => {
+      p.Estado = waEstado;
+    });
+
     this.notify();
     return true;
   }
@@ -1078,6 +1100,14 @@ class SQLiteService {
       );
       stmt.run(['Anulado', motivoText, motivoText, nowTime, nTicket]);
       stmt.free();
+
+      try {
+        const stmtWa = this.db.prepare('UPDATE PedidosWhatsApp SET Estado = "Anulado" WHERE NTicket = ?');
+        stmtWa.run([nTicket]);
+        stmtWa.free();
+      } catch (err) {
+        console.error('Error syncing anularComanda to PedidosWhatsApp:', err);
+      }
     }
 
     const idx = this.fallbackComandas.findIndex((c) => c.NTicket === nTicket);
@@ -1088,6 +1118,11 @@ class SQLiteService {
         ? `${this.fallbackComandas[idx].Notas} | ${motivoText}`
         : motivoText;
     }
+
+    const matchedWa = this.fallbackPedidosWhatsApp.filter((p) => p.NTicket === nTicket);
+    matchedWa.forEach((p) => {
+      p.Estado = 'Anulado';
+    });
 
     this.notify();
     return true;
@@ -1193,6 +1228,17 @@ class SQLiteService {
           HoraActualizacion: ventaData.Fecha.substring(11, 16) || '12:00',
         });
 
+        // If sale ticket belongs to a WhatsApp order, mark WhatsApp order as 'Cobrado'
+        try {
+          const stmtWa = activeDb.prepare('UPDATE PedidosWhatsApp SET Estado = "Cobrado" WHERE NTicket = ?');
+          stmtWa.run([ventaData.NTicket]);
+          stmtWa.free();
+        } catch {}
+        const waMatch = this.fallbackPedidosWhatsApp.find((p) => p.NTicket === ventaData.NTicket);
+        if (waMatch) {
+          waMatch.Estado = 'Cobrado';
+        }
+
         this.descontarInventarioPorItems(cartItems, ventaData.NTicket);
         this.notify();
         return { venta: newVenta, detalles: createdDetalles };
@@ -1248,6 +1294,11 @@ class SQLiteService {
         HoraCreacion: ventaData.Fecha.substring(11, 16) || '12:00',
         HoraActualizacion: ventaData.Fecha.substring(11, 16) || '12:00',
       });
+
+      const waMatch = this.fallbackPedidosWhatsApp.find((p) => p.NTicket === ventaData.NTicket);
+      if (waMatch) {
+        waMatch.Estado = 'Cobrado';
+      }
 
       this.notify();
       return { venta: newVenta, detalles: createdDetalles };
@@ -1969,6 +2020,88 @@ class SQLiteService {
       if (nTicket) item.NTicket = nTicket;
       if (comandaId) item.ComandaId = comandaId;
     }
+
+    // Bidirectional sync: if this WhatsApp order has a linked NTicket or ComandaId, update the Comanda as well!
+    const targetTicket = nTicket || (item ? item.NTicket : undefined);
+    if (targetTicket) {
+      const nowTime = new Date().toISOString().substring(11, 16);
+      if (nuevoEstado === 'En Cocina') {
+        if (this.db) {
+          const stmtC = this.db.prepare('UPDATE Comandas SET Estado = "Cocina", HoraActualizacion = ? WHERE NTicket = ?');
+          stmtC.run([nowTime, targetTicket]);
+          stmtC.free();
+        }
+        const cIdx = this.fallbackComandas.findIndex((c) => c.NTicket === targetTicket);
+        if (cIdx !== -1) {
+          this.fallbackComandas[cIdx].Estado = 'Cocina';
+          this.fallbackComandas[cIdx].HoraActualizacion = nowTime;
+        }
+      } else if (nuevoEstado === 'Entregado') {
+        if (this.db) {
+          const stmtC = this.db.prepare('UPDATE Comandas SET Estado = "Entregado", HoraActualizacion = ? WHERE NTicket = ?');
+          stmtC.run([nowTime, targetTicket]);
+          stmtC.free();
+        }
+        const cIdx = this.fallbackComandas.findIndex((c) => c.NTicket === targetTicket);
+        if (cIdx !== -1) {
+          this.fallbackComandas[cIdx].Estado = 'Entregado';
+          this.fallbackComandas[cIdx].HoraActualizacion = nowTime;
+        }
+      } else if (nuevoEstado === 'Cobrado') {
+        const fp = item ? item.FormaPago : 'Efectivo';
+        if (this.db) {
+          const stmtC = this.db.prepare('UPDATE Comandas SET Estado = "Cobrado", FormaPago = ?, HoraActualizacion = ? WHERE NTicket = ?');
+          stmtC.run([fp, nowTime, targetTicket]);
+          stmtC.free();
+
+          const comanda = this.getComandaByTicket(targetTicket);
+          if (comanda) {
+            const existsVenta = this.db.exec(`SELECT COUNT(*) FROM Ventas WHERE NTicket = '${targetTicket}'`);
+            const count = existsVenta.length > 0 && existsVenta[0].values[0] ? Number(existsVenta[0].values[0][0]) : 0;
+            if (count === 0) {
+              const stmtVenta = this.db.prepare(
+                'INSERT INTO Ventas (Fecha, NTicket, Cliente, Monto, FormaPago) VALUES (?, ?, ?, ?, ?)'
+              );
+              stmtVenta.run([comanda.Fecha, comanda.NTicket, comanda.Cliente, comanda.Monto, fp]);
+              stmtVenta.free();
+            }
+          }
+        }
+        const cIdx = this.fallbackComandas.findIndex((c) => c.NTicket === targetTicket);
+        if (cIdx !== -1) {
+          this.fallbackComandas[cIdx].Estado = 'Cobrado';
+          this.fallbackComandas[cIdx].FormaPago = fp;
+          this.fallbackComandas[cIdx].HoraActualizacion = nowTime;
+          const exists = this.fallbackVentas.some((v) => v.NTicket === targetTicket);
+          if (!exists) {
+            this.fallbackVentas.push({
+              VentasId: this.fallbackVentas.length + 1,
+              Fecha: this.fallbackComandas[cIdx].Fecha,
+              NTicket: targetTicket,
+              Cliente: this.fallbackComandas[cIdx].Cliente,
+              Monto: this.fallbackComandas[cIdx].Monto,
+              FormaPago: fp,
+            });
+          }
+        }
+      } else if (nuevoEstado === 'Anulado' || nuevoEstado === 'Cancelado') {
+        const motivo = 'Anulado desde pedidos WhatsApp';
+        if (this.db) {
+          const stmtC = this.db.prepare(
+            'UPDATE Comandas SET Estado = "Anulado", Notas = CASE WHEN Notas IS NULL OR Notas = "" THEN ? ELSE Notas || " | " || ? END, HoraActualizacion = ? WHERE NTicket = ?'
+          );
+          stmtC.run([motivo, motivo, nowTime, targetTicket]);
+          stmtC.free();
+        }
+        const cIdx = this.fallbackComandas.findIndex((c) => c.NTicket === targetTicket);
+        if (cIdx !== -1) {
+          this.fallbackComandas[cIdx].Estado = 'Anulado';
+          this.fallbackComandas[cIdx].HoraActualizacion = nowTime;
+          this.fallbackComandas[cIdx].Notas = this.fallbackComandas[cIdx].Notas ? `${this.fallbackComandas[cIdx].Notas} | ${motivo}` : motivo;
+        }
+      }
+    }
+
     this.notify();
     return true;
   }

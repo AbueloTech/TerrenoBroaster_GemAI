@@ -99,7 +99,7 @@ export interface Usuario {
   UltimoAcceso?: string;
 }
 
-export type EstadoPedidoWhatsApp = 'Pendiente' | 'En Cocina' | 'Entregado' | 'Cancelado';
+export type EstadoPedidoWhatsApp = 'Pendiente' | 'En Cocina' | 'Entregado' | 'Cobrado' | 'Anulado' | 'Cancelado';
 
 export interface PedidoWhatsAppItem {
   platoNombre: string;

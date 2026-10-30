@@ -30,8 +30,14 @@ import {
   Printer,
   ChevronDown,
   Layers,
-  Volume2,
   Smartphone,
+  Eye,
+  Search,
+  CheckCircle2,
+  XCircle,
+  Flame,
+  UtensilsCrossed,
+  Volume2,
 } from 'lucide-react';
 import { PedidoWhatsApp, EstadoPedidoWhatsApp, Plato, CartItem, FormaPago, PedidoWhatsAppItem } from '../types';
 import { sqliteService } from '../db/sqliteService';
@@ -167,14 +173,41 @@ export const WhatsAppOrdersModal: React.FC<WhatsAppOrdersModalProps> = ({
     return draftItems.reduce((acc, item) => acc + item.cantidad * item.precioUnitario, 0);
   }, [draftItems]);
 
+  // Details Modal State & Filters
+  const [selectedDetailsPedido, setSelectedDetailsPedido] = useState<PedidoWhatsApp | null>(null);
+  const [searchTerm, setSearchTerm] = useState<string>('');
+  const [deliveryFilter, setDeliveryFilter] = useState<'Todos' | 'Delivery' | 'Para llevar'>('Todos');
+
+  // Keep active details modal in sync with real-time updates
+  const activeDetailsPedido = useMemo(() => {
+    if (!selectedDetailsPedido) return null;
+    return pedidos.find((p) => p.Id === selectedDetailsPedido.Id) || selectedDetailsPedido;
+  }, [selectedDetailsPedido, pedidos]);
+
   // Filtered orders
-  const filteredPedidos = pedidos.filter((p) => {
-    if (filterEstado === 'Todos') return true;
-    return p.Estado === filterEstado;
-  });
+  const filteredPedidos = useMemo(() => {
+    return pedidos.filter((p) => {
+      if (filterEstado !== 'Todos' && p.Estado !== filterEstado) return false;
+      if (deliveryFilter !== 'Todos' && p.TipoEntrega !== deliveryFilter) return false;
+      if (searchTerm.trim()) {
+        const q = searchTerm.toLowerCase();
+        const matchName = p.NombreCliente.toLowerCase().includes(q);
+        const matchPhone = p.TelefonoCliente.toLowerCase().includes(q);
+        const matchTicket = p.NTicket ? p.NTicket.toLowerCase().includes(q) : false;
+        const matchId = String(p.Id).includes(q);
+        const matchItems = p.Items.some((it) => it.platoNombre.toLowerCase().includes(q));
+        const matchDir = p.DireccionEntrega ? p.DireccionEntrega.toLowerCase().includes(q) : false;
+        if (!matchName && !matchPhone && !matchTicket && !matchId && !matchItems && !matchDir) return false;
+      }
+      return true;
+    });
+  }, [pedidos, filterEstado, deliveryFilter, searchTerm]);
 
   const pendingCount = pedidos.filter((p) => p.Estado === 'Pendiente').length;
   const inKitchenCount = pedidos.filter((p) => p.Estado === 'En Cocina').length;
+  const deliveredCount = pedidos.filter((p) => p.Estado === 'Entregado').length;
+  const cobradoCount = pedidos.filter((p) => p.Estado === 'Cobrado').length;
+  const anuladoCount = pedidos.filter((p) => p.Estado === 'Anulado' || p.Estado === 'Cancelado').length;
 
   const handleSavePhone = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -580,20 +613,28 @@ export const WhatsAppOrdersModal: React.FC<WhatsAppOrdersModalProps> = ({
         <div className="p-4 bg-stone-900/50 border-b border-stone-800 flex flex-wrap items-center justify-between gap-3">
           {/* Status Filter Tabs */}
           <div className="flex items-center space-x-1.5 bg-stone-950 p-1 rounded-xl border border-stone-800 text-xs overflow-x-auto">
-            {(['Todos', 'Pendiente', 'En Cocina', 'Entregado', 'Cancelado'] as const).map((est) => {
-              const isSelected = filterEstado === est;
-              const count = est === 'Todos' ? pedidos.length : pedidos.filter((p) => p.Estado === est).length;
+            {(
+              [
+                { label: 'Todos', count: pedidos.length },
+                { label: 'Pendiente', count: pendingCount },
+                { label: 'En Cocina', count: inKitchenCount },
+                { label: 'Entregado', count: deliveredCount },
+                { label: 'Cobrado', count: cobradoCount },
+                { label: 'Anulado', count: anuladoCount },
+              ] as const
+            ).map((tab) => {
+              const isSelected = filterEstado === tab.label;
               return (
                 <button
-                  key={est}
-                  onClick={() => setFilterEstado(est)}
+                  key={tab.label}
+                  onClick={() => setFilterEstado(tab.label as EstadoPedidoWhatsApp | 'Todos')}
                   className={`px-3 py-1.5 rounded-lg font-medium transition-all flex items-center space-x-1.5 ${
                     isSelected
                       ? 'bg-emerald-600 text-stone-950 font-bold shadow-sm'
                       : 'text-stone-400 hover:text-white hover:bg-stone-800'
                   }`}
                 >
-                  <span>{est === 'Todos' ? 'Todos los Pedidos' : est}</span>
+                  <span>{tab.label === 'Todos' ? 'Todos' : tab.label}</span>
                   <span
                     className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
                       isSelected
@@ -601,7 +642,7 @@ export const WhatsAppOrdersModal: React.FC<WhatsAppOrdersModalProps> = ({
                         : 'bg-stone-800 text-stone-400'
                     }`}
                   >
-                    {count}
+                    {tab.count}
                   </span>
                 </button>
               );
@@ -636,6 +677,49 @@ export const WhatsAppOrdersModal: React.FC<WhatsAppOrdersModalProps> = ({
           </div>
         </div>
 
+        {/* Search & Secondary Filter Toolbar */}
+        <div className="px-4 py-2.5 bg-stone-950/80 border-b border-stone-800/80 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex items-center space-x-2 flex-1 max-w-md">
+            <div className="relative w-full">
+              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-stone-500" />
+              <input
+                type="text"
+                placeholder="Buscar por cliente, teléfono, ticket o plato..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-8 pr-7 py-1.5 bg-stone-900 border border-stone-800 rounded-xl text-stone-200 placeholder-stone-500 text-xs focus:outline-none focus:border-emerald-500/50"
+              />
+              {searchTerm && (
+                <button
+                  onClick={() => setSearchTerm('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-stone-500 hover:text-stone-300"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center space-x-3 text-stone-400">
+            <div className="flex items-center space-x-1.5">
+              <span>Tipo Entrega:</span>
+              <select
+                value={deliveryFilter}
+                onChange={(e) => setDeliveryFilter(e.target.value as any)}
+                className="bg-stone-900 border border-stone-800 text-stone-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-emerald-500"
+              >
+                <option value="Todos">Todos</option>
+                <option value="Delivery">Solo Delivery</option>
+                <option value="Para llevar">Solo Para Llevar</option>
+              </select>
+            </div>
+
+            <span className="text-stone-500 font-mono">
+              Mostrando {filteredPedidos.length} de {pedidos.length}
+            </span>
+          </div>
+        </div>
+
         {/* Toast Alert Feedback */}
         {toastMessage && (
           <div className="bg-emerald-600 text-stone-950 font-bold px-4 py-2 text-xs flex items-center justify-between animate-in slide-in-from-top-2">
@@ -649,240 +733,227 @@ export const WhatsAppOrdersModal: React.FC<WhatsAppOrdersModalProps> = ({
           </div>
         )}
 
-        {/* Orders List Area */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
-          {filteredPedidos.length === 0 ? (
-            <div className="py-16 text-center space-y-4">
-              <div className="w-16 h-16 rounded-2xl bg-stone-800/80 border border-stone-700 flex items-center justify-center mx-auto text-stone-500">
-                <MessageSquare className="w-8 h-8 text-stone-500" />
-              </div>
-              <div className="space-y-1">
-                <h3 className="text-base font-bold text-stone-200">
-                  No hay pedidos de WhatsApp con estado "{filterEstado}"
-                </h3>
-                <p className="text-xs text-stone-400 max-w-md mx-auto">
-                  Copia los mensajes de tus clientes desde WhatsApp Web usando el botón <strong>"Pegar Mensaje de WhatsApp"</strong> o simula un pedido de prueba.
-                </p>
-              </div>
-              <div className="flex items-center justify-center space-x-3 pt-2">
-                <button
-                  onClick={() => setIsPasteModalOpen(true)}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-stone-950 text-xs font-bold rounded-xl shadow-md"
-                >
-                  Pegar Mensaje de WhatsApp
-                </button>
-                <button
-                  onClick={() => handleSimulateIncomingOrder()}
-                  className="px-4 py-2 bg-stone-800 hover:bg-stone-700 text-stone-200 text-xs font-semibold rounded-xl border border-stone-700"
-                >
-                  Simular Pedido de Prueba
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {filteredPedidos.map((pedido) => {
-                const isPending = pedido.Estado === 'Pendiente';
-                const isKitchen = pedido.Estado === 'En Cocina';
-                const isDelivered = pedido.Estado === 'Entregado';
-                const isCancelled = pedido.Estado === 'Cancelado';
-
-                return (
-                  <div
-                    key={pedido.Id}
-                    className={`rounded-2xl border transition-all p-4.5 flex flex-col justify-between space-y-3 shadow-lg ${
-                      isPending
-                        ? 'bg-stone-900 border-emerald-500/50 shadow-emerald-950/20 ring-1 ring-emerald-500/20'
-                        : isKitchen
-                        ? 'bg-stone-900/90 border-amber-500/40 shadow-amber-950/20'
-                        : isDelivered
-                        ? 'bg-stone-900/60 border-stone-800 opacity-90'
-                        : 'bg-stone-900/40 border-stone-800 opacity-70'
-                    }`}
-                  >
-                    {/* Top Row: Client & Status Badge */}
-                    <div className="flex items-start justify-between gap-2 border-b border-stone-800/80 pb-3">
-                      <div>
-                        <div className="flex items-center space-x-2">
-                          <h4 className="font-bold text-white text-sm tracking-wide">
-                            {pedido.NombreCliente}
-                          </h4>
-                          {pedido.TipoEntrega === 'Delivery' ? (
-                            <span className="flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-950/80 text-purple-300 border border-purple-500/30">
-                              <Truck className="w-3 h-3" />
-                              <span>Delivery</span>
-                            </span>
-                          ) : (
-                            <span className="flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-950/80 text-blue-300 border border-blue-500/30">
-                              <Package className="w-3 h-3" />
-                              <span>Para llevar</span>
-                            </span>
-                          )}
+        {/* Orders Table Area (Styled like HistorialVentasView) */}
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+          <div className="bg-stone-900 border border-stone-800 rounded-2xl overflow-hidden shadow-xl">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-stone-950 border-b border-stone-800 text-stone-400 font-bold uppercase tracking-wider text-[11px]">
+                  <tr>
+                    <th className="py-3 px-3.5 w-24">Ticket / ID</th>
+                    <th className="py-3 px-3.5">Fecha y Hora</th>
+                    <th className="py-3 px-3.5">Cliente / Teléfono</th>
+                    <th className="py-3 px-3.5">Tipo Entrega</th>
+                    <th className="py-3 px-3.5">Resumen de Pedido</th>
+                    <th className="py-3 px-3.5">Forma de Pago</th>
+                    <th className="py-3 px-3.5 text-right">Total</th>
+                    <th className="py-3 px-3.5 text-center">Estado</th>
+                    <th className="py-3 px-3.5 text-center w-48">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-stone-800/80">
+                  {filteredPedidos.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} className="py-14 text-center space-y-3">
+                        <MessageSquare className="w-8 h-8 text-stone-600 mx-auto" />
+                        <div className="text-stone-400 font-medium">
+                          No se encontraron pedidos de WhatsApp con los filtros aplicados.
                         </div>
-
-                        <div className="flex items-center space-x-2 mt-1 text-xs text-stone-400 font-mono">
-                          <Phone className="w-3 h-3 text-emerald-400" />
-                          <span>{pedido.TelefonoCliente}</span>
-                          <span className="text-stone-600">•</span>
-                          <Clock className="w-3 h-3 text-stone-500" />
-                          <span>{pedido.FechaCreacion || pedido.Fecha}</span>
+                        <div className="flex items-center justify-center space-x-3 pt-2">
+                          <button
+                            onClick={() => setIsPasteModalOpen(true)}
+                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-stone-950 text-xs font-bold rounded-lg shadow-sm"
+                          >
+                            Pegar Mensaje de WhatsApp
+                          </button>
+                          <button
+                            onClick={() => handleSimulateIncomingOrder()}
+                            className="px-3 py-1.5 bg-stone-800 hover:bg-stone-700 text-stone-300 text-xs font-semibold rounded-lg border border-stone-700"
+                          >
+                            Simular Pedido de Prueba
+                          </button>
                         </div>
-                      </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredPedidos.map((pedido) => {
+                      const isPending = pedido.Estado === 'Pendiente';
+                      const isKitchen = pedido.Estado === 'En Cocina';
+                      const isDelivered = pedido.Estado === 'Entregado';
+                      const isCobrado = pedido.Estado === 'Cobrado';
+                      const isAnulado = pedido.Estado === 'Anulado' || pedido.Estado === 'Cancelado';
 
-                      <div className="flex flex-col items-end space-y-1">
-                        <span
-                          className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
-                            isPending
-                              ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 animate-pulse'
-                              : isKitchen
-                              ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                              : isDelivered
-                              ? 'bg-blue-500/20 text-blue-300 border-blue-500/40'
-                              : 'bg-stone-800 text-stone-400 border-stone-700'
-                          }`}
+                      // Dish preview text
+                      const totalPlatosCount = pedido.Items.reduce((acc, it) => acc + it.cantidad, 0);
+                      const itemsPreview = pedido.Items.map((it) => `${it.cantidad}x ${it.platoNombre}`).join(', ');
+
+                      return (
+                        <tr
+                          key={pedido.Id}
+                          className="hover:bg-stone-800/50 transition-colors group cursor-pointer"
+                          onClick={() => setSelectedDetailsPedido(pedido)}
                         >
-                          {pedido.Estado}
-                        </span>
-                        {pedido.NTicket && (
-                          <span className="text-[10px] font-mono font-bold text-amber-400 bg-amber-950/50 px-1.5 py-0.5 rounded border border-amber-600/30">
-                            Ticket #{pedido.NTicket}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Middle: Dish Items List */}
-                    <div className="space-y-1.5 bg-stone-950/60 p-3 rounded-xl border border-stone-800/80">
-                      <div className="text-[11px] font-semibold text-stone-400 uppercase tracking-wider flex items-center justify-between">
-                        <span>Platos Solicitados ({pedido.Items.length}):</span>
-                        <span className="text-stone-300 font-bold font-mono">
-                          Total: {formatCurrency(pedido.Total)}
-                        </span>
-                      </div>
-                      <div className="space-y-1 text-xs">
-                        {pedido.Items.map((item, idx) => (
-                          <div key={idx} className="flex items-center justify-between text-stone-200">
-                            <span className="font-medium">
-                              <span className="font-bold text-amber-400 font-mono mr-1.5">
-                                {item.cantidad}x
+                          {/* Ticket / ID */}
+                          <td className="py-3 px-3.5 font-mono">
+                            {pedido.NTicket ? (
+                              <span className="font-black text-amber-400 bg-amber-950/40 px-2 py-0.5 rounded border border-amber-600/30">
+                                {pedido.NTicket}
                               </span>
-                              {item.platoNombre}
+                            ) : (
+                              <span className="text-stone-500 font-semibold">#{pedido.Id}</span>
+                            )}
+                          </td>
+
+                          {/* Fecha y Hora */}
+                          <td className="py-3 px-3.5 font-mono text-stone-300">
+                            <div>{pedido.FechaCreacion || pedido.Fecha}</div>
+                            {pedido.FechaCreacion && pedido.Fecha && (
+                              <div className="text-[10px] text-stone-500">{pedido.Fecha}</div>
+                            )}
+                          </td>
+
+                          {/* Cliente / Teléfono */}
+                          <td className="py-3 px-3.5">
+                            <div className="font-semibold text-stone-100 flex items-center space-x-1.5">
+                              <span>{pedido.NombreCliente}</span>
+                            </div>
+                            <div className="text-[11px] font-mono text-emerald-400 flex items-center space-x-1 mt-0.5">
+                              <Phone className="w-3 h-3 text-stone-500" />
+                              <span>{pedido.TelefonoCliente}</span>
+                            </div>
+                          </td>
+
+                          {/* Tipo Entrega */}
+                          <td className="py-3 px-3.5">
+                            {pedido.TipoEntrega === 'Delivery' ? (
+                              <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[11px] font-bold bg-purple-950/80 text-purple-300 border border-purple-800/60">
+                                <Truck className="w-3 h-3" />
+                                <span>Delivery</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[11px] font-bold bg-blue-950/80 text-blue-300 border border-blue-800/60">
+                                <Package className="w-3 h-3" />
+                                <span>Para llevar</span>
+                              </span>
+                            )}
+                            {pedido.DireccionEntrega && (
+                              <div className="text-[10px] text-stone-400 truncate max-w-[140px] mt-0.5" title={pedido.DireccionEntrega}>
+                                {pedido.DireccionEntrega}
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Resumen de Pedido */}
+                          <td className="py-3 px-3.5 max-w-xs">
+                            <div className="flex items-center space-x-1.5">
+                              <span className="font-bold text-stone-200">
+                                {totalPlatosCount} {totalPlatosCount === 1 ? 'plato' : 'platos'}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-stone-400 truncate mt-0.5" title={itemsPreview}>
+                              {itemsPreview}
+                            </div>
+                          </td>
+
+                          {/* Forma de Pago */}
+                          <td className="py-3 px-3.5">
+                            <span
+                              className={`px-2 py-0.5 rounded text-[11px] font-bold ${
+                                pedido.FormaPago === 'Efectivo'
+                                  ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-800/60'
+                                  : pedido.FormaPago === 'Pago Movil'
+                                  ? 'bg-sky-950/80 text-sky-300 border border-sky-800/60'
+                                  : pedido.FormaPago === 'Punto de Venta'
+                                  ? 'bg-purple-950/80 text-purple-300 border border-purple-800/60'
+                                  : 'bg-amber-950/80 text-amber-300 border border-amber-800/60'
+                              }`}
+                            >
+                              {pedido.FormaPago}
                             </span>
-                            <span className="font-mono text-stone-400 text-[11px]">
-                              {formatCurrency(item.precioUnitario * item.cantidad)}
+                          </td>
+
+                          {/* Total */}
+                          <td className="py-3 px-3.5 text-right font-black text-sm text-stone-100 font-mono">
+                            {formatCurrency(pedido.Total)}
+                          </td>
+
+                          {/* Estado */}
+                          <td className="py-3 px-3.5 text-center">
+                            <span
+                              className={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
+                                isPending
+                                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 animate-pulse'
+                                  : isKitchen
+                                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                                  : isDelivered
+                                  ? 'bg-blue-500/20 text-blue-300 border-blue-500/40'
+                                  : isCobrado
+                                  ? 'bg-emerald-900/60 text-emerald-300 border-emerald-500/50'
+                                  : 'bg-rose-950/60 text-rose-300 border-rose-800/60'
+                              }`}
+                            >
+                              {pedido.Estado}
                             </span>
-                          </div>
-                        ))}
-                      </div>
+                          </td>
 
-                      {pedido.DireccionEntrega && (
-                        <div className="pt-2 mt-2 border-t border-stone-800/80 flex items-start space-x-1.5 text-xs text-stone-300">
-                          <MapPin className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
-                          <span className="leading-tight">{pedido.DireccionEntrega}</span>
-                        </div>
-                      )}
+                          {/* Acciones */}
+                          <td className="py-3 px-3.5 text-center" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex items-center justify-center space-x-1.5">
+                              {/* Prominent "Detalles" button like in Historial de Ventas */}
+                              <button
+                                onClick={() => setSelectedDetailsPedido(pedido)}
+                                className="inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-stone-950 font-black text-xs shadow-sm transition-all"
+                                title="Ver detalles completos del pedido de WhatsApp"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                                <span>Detalles</span>
+                              </button>
 
-                      <div className="flex items-center justify-between pt-1 text-[11px] text-stone-400">
-                        <span className="flex items-center space-x-1">
-                          <CreditCard className="w-3 h-3 text-stone-500" />
-                          <span>Pago: <strong className="text-stone-300">{pedido.FormaPago}</strong></span>
-                        </span>
-                        {pedido.Notas && (
-                          <span className="truncate max-w-[200px] text-stone-400 italic" title={pedido.Notas}>
-                            "{pedido.Notas}"
-                          </span>
-                        )}
-                      </div>
-                    </div>
+                              {/* Send to Kitchen quick action if pending */}
+                              {isPending && (
+                                <button
+                                  onClick={() => handleConvertToComanda(pedido)}
+                                  className="inline-flex items-center space-x-1 px-2 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-stone-950 font-bold text-xs shadow-sm transition-all"
+                                  title="Mandar comanda directo a cocina"
+                                >
+                                  <ChefHat className="w-3.5 h-3.5" />
+                                  <span className="hidden sm:inline">Cocina</span>
+                                </button>
+                              )}
 
-                    {/* Raw Message Viewer Toggle */}
-                    {viewingOriginalId === pedido.Id && (
-                      <div className="bg-stone-950 p-2.5 rounded-lg border border-stone-800 text-[11px] font-mono text-stone-300 space-y-1">
-                        <div className="font-bold text-emerald-400 text-[10px] uppercase">
-                          Texto Original de WhatsApp:
-                        </div>
-                        <p className="whitespace-pre-wrap">{pedido.MensajeOriginal}</p>
-                      </div>
-                    )}
+                              {/* Direct WhatsApp notify */}
+                              <a
+                                href={buildWhatsAppReplyUrl(
+                                  pedido.TelefonoCliente,
+                                  pedido,
+                                  isPending ? 'recibido' : isKitchen ? 'en_camino' : 'listo_retiro'
+                                )}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="p-1.5 rounded-lg bg-emerald-950/60 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-500/30 transition-colors"
+                                title="Abrir chat en WhatsApp Web"
+                              >
+                                <Send className="w-3.5 h-3.5" />
+                              </a>
 
-                    {/* Action Bar Bottom */}
-                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-stone-800/80">
-                      <div className="flex items-center space-x-1">
-                        <button
-                          onClick={() =>
-                            setViewingOriginalId(viewingOriginalId === pedido.Id ? null : pedido.Id)
-                          }
-                          className="text-[11px] text-stone-400 hover:text-stone-200 underline"
-                        >
-                          {viewingOriginalId === pedido.Id ? 'Ocultar texto' : 'Ver mensaje'}
-                        </button>
-
-                        {/* Direct WhatsApp reply button */}
-                        <a
-                          href={buildWhatsAppReplyUrl(
-                            pedido.TelefonoCliente,
-                            pedido,
-                            isPending ? 'recibido' : isKitchen ? 'en_camino' : 'listo_retiro'
-                          )}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center space-x-1 px-2.5 py-1 bg-emerald-950/60 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-500/30 rounded-lg text-xs font-medium transition-colors"
-                          title="Responder cliente por WhatsApp Web con plantilla"
-                        >
-                          <Send className="w-3 h-3" />
-                          <span>Notificar</span>
-                        </a>
-                      </div>
-
-                      <div className="flex items-center space-x-1.5">
-                        {/* Send to Kitchen button */}
-                        {isPending && (
-                          <button
-                            onClick={() => handleConvertToComanda(pedido)}
-                            className="flex items-center space-x-1 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 text-xs font-bold shadow-md shadow-amber-500/20 transition-all active:scale-95"
-                            title="Generar comanda y enviar directo al monitor de cocina"
-                          >
-                            <ChefHat className="w-3.5 h-3.5" />
-                            <span>Mandar a Cocina</span>
-                          </button>
-                        )}
-
-                        {/* Load into POS Cart */}
-                        {onLoadOrderToCart && (
-                          <button
-                            onClick={() => handleLoadToCart(pedido)}
-                            title="Cargar platos en el Punto de Venta (POS)"
-                            className="p-1.5 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-300 border border-stone-700 transition-colors"
-                          >
-                            <ShoppingBag className="w-3.5 h-3.5 text-amber-400" />
-                          </button>
-                        )}
-
-                        {/* Quick state transitions */}
-                        {isKitchen && (
-                          <button
-                            onClick={() => handleChangeStatus(pedido.Id, 'Entregado')}
-                            className="px-2.5 py-1.5 rounded-lg bg-blue-950/60 hover:bg-blue-900/60 text-blue-300 border border-blue-500/30 text-xs font-semibold"
-                          >
-                            Marcar Entregado
-                          </button>
-                        )}
-
-                        {/* Delete */}
-                        <button
-                          onClick={() => handleDelete(pedido.Id)}
-                          title="Eliminar este pedido"
-                          className="p-1.5 rounded-lg bg-stone-800 hover:bg-rose-950 hover:text-rose-400 text-stone-500 transition-colors"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+                              {/* Delete */}
+                              <button
+                                onClick={() => handleDelete(pedido.Id)}
+                                className="p-1.5 rounded-lg bg-stone-800 hover:bg-rose-950 hover:text-rose-400 text-stone-500 transition-colors"
+                                title="Eliminar pedido"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
             </div>
-          )}
+          </div>
         </div>
 
         {/* Footer info bar */}
@@ -913,6 +984,304 @@ export const WhatsAppOrdersModal: React.FC<WhatsAppOrdersModalProps> = ({
         </div>
 
       </div>
+
+      {/* DETAILS MODAL FOR SELECTED WHATSAPP ORDER */}
+      {activeDetailsPedido && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center p-3 sm:p-4 bg-black/90 backdrop-blur-md animate-in fade-in">
+          <div className="bg-stone-900 border border-stone-700 rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6 shadow-2xl flex flex-col space-y-4">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-stone-800 pb-3">
+              <div className="flex items-center space-x-3">
+                <div className="p-2 rounded-xl bg-emerald-950/80 border border-emerald-500/40 text-emerald-400">
+                  <MessageSquare className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <h3 className="text-lg font-black text-white">
+                      Detalle del Pedido WhatsApp
+                    </h3>
+                    {activeDetailsPedido.NTicket ? (
+                      <span className="font-mono font-black text-xs text-amber-400 bg-amber-950/60 px-2 py-0.5 rounded border border-amber-600/40">
+                        Ticket #{activeDetailsPedido.NTicket}
+                      </span>
+                    ) : (
+                      <span className="font-mono text-xs text-stone-400 bg-stone-800 px-2 py-0.5 rounded">
+                        Pedido #{activeDetailsPedido.Id}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-stone-400 mt-0.5">
+                    Registrado: {activeDetailsPedido.FechaCreacion || ''} {activeDetailsPedido.Fecha}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-3">
+                <span
+                  className={`px-3 py-1 rounded-full text-xs font-bold border ${
+                    activeDetailsPedido.Estado === 'Pendiente'
+                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 animate-pulse'
+                      : activeDetailsPedido.Estado === 'En Cocina'
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                      : activeDetailsPedido.Estado === 'Entregado'
+                      ? 'bg-blue-500/20 text-blue-300 border-blue-500/40'
+                      : activeDetailsPedido.Estado === 'Cobrado'
+                      ? 'bg-emerald-900/60 text-emerald-300 border-emerald-500/50'
+                      : 'bg-rose-950/60 text-rose-300 border-rose-800/60'
+                  }`}
+                >
+                  {activeDetailsPedido.Estado}
+                </span>
+
+                <button
+                  onClick={() => setSelectedDetailsPedido(null)}
+                  className="p-1.5 rounded-lg text-stone-400 hover:text-white hover:bg-stone-800 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Info Cards Row */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+              {/* Cliente */}
+              <div className="bg-stone-950/80 p-3 rounded-xl border border-stone-800 space-y-1.5">
+                <div className="font-bold text-stone-400 uppercase tracking-wider text-[10px]">
+                  Cliente & Contacto
+                </div>
+                <div className="font-black text-sm text-stone-100">
+                  {activeDetailsPedido.NombreCliente}
+                </div>
+                <div className="flex items-center space-x-1.5 text-emerald-400 font-mono">
+                  <Phone className="w-3.5 h-3.5 text-stone-500" />
+                  <span>{activeDetailsPedido.TelefonoCliente}</span>
+                </div>
+                <a
+                  href={buildWhatsAppReplyUrl(
+                    activeDetailsPedido.TelefonoCliente,
+                    activeDetailsPedido,
+                    activeDetailsPedido.Estado === 'Pendiente' ? 'recibido' : 'en_camino'
+                  )}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-1 inline-flex items-center space-x-1 text-[11px] text-emerald-400 hover:underline"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  <span>Abrir Chat WhatsApp</span>
+                </a>
+              </div>
+
+              {/* Entrega */}
+              <div className="bg-stone-950/80 p-3 rounded-xl border border-stone-800 space-y-1.5">
+                <div className="font-bold text-stone-400 uppercase tracking-wider text-[10px]">
+                  Modalidad de Entrega
+                </div>
+                <div>
+                  {activeDetailsPedido.TipoEntrega === 'Delivery' ? (
+                    <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[11px] font-bold bg-purple-950/80 text-purple-300 border border-purple-800/60">
+                      <Truck className="w-3.5 h-3.5" />
+                      <span>Servicio Delivery</span>
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[11px] font-bold bg-blue-950/80 text-blue-300 border border-blue-800/60">
+                      <Package className="w-3.5 h-3.5" />
+                      <span>Retiro Para Llevar</span>
+                    </span>
+                  )}
+                </div>
+                {activeDetailsPedido.DireccionEntrega ? (
+                  <div className="flex items-start space-x-1.5 text-stone-300 pt-0.5">
+                    <MapPin className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
+                    <span className="leading-snug">{activeDetailsPedido.DireccionEntrega}</span>
+                  </div>
+                ) : (
+                  <div className="text-stone-500 italic">Sin dirección (retiro en local)</div>
+                )}
+              </div>
+
+              {/* Pago & Estado Sync */}
+              <div className="bg-stone-950/80 p-3 rounded-xl border border-stone-800 space-y-1.5">
+                <div className="font-bold text-stone-400 uppercase tracking-wider text-[10px]">
+                  Pago & Estado Actual
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-stone-400">Método de Pago:</span>
+                  <span className="font-bold text-stone-200">{activeDetailsPedido.FormaPago}</span>
+                </div>
+                <div className="flex items-center justify-between pt-1 border-t border-stone-800">
+                  <span className="text-stone-400">Cambiar Estado:</span>
+                  <select
+                    value={activeDetailsPedido.Estado}
+                    onChange={(e) =>
+                      handleChangeStatus(activeDetailsPedido.Id, e.target.value as EstadoPedidoWhatsApp)
+                    }
+                    className="bg-stone-900 border border-stone-700 text-stone-200 text-xs rounded-lg px-2 py-1 font-bold focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value="Pendiente">Pendiente</option>
+                    <option value="En Cocina">En Cocina</option>
+                    <option value="Entregado">Entregado</option>
+                    <option value="Cobrado">Cobrado</option>
+                    <option value="Anulado">Anulado</option>
+                  </select>
+                </div>
+                {activeDetailsPedido.Notas && (
+                  <div className="text-[11px] text-amber-300/90 italic pt-0.5">
+                    "{activeDetailsPedido.Notas}"
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Dish Breakdown Table */}
+            <div className="space-y-2">
+              <h4 className="font-bold text-stone-200 text-xs uppercase tracking-wider flex items-center space-x-1.5">
+                <UtensilsCrossed className="w-3.5 h-3.5 text-amber-400" />
+                <span>Desglose de Platos del Pedido ({activeDetailsPedido.Items.length})</span>
+              </h4>
+
+              <div className="bg-stone-950 border border-stone-800 rounded-xl overflow-hidden">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-stone-900 border-b border-stone-800 text-stone-400 font-bold uppercase tracking-wider text-[10px]">
+                    <tr>
+                      <th className="py-2.5 px-3">Plato / Ítem</th>
+                      <th className="py-2.5 px-3 text-center w-20">Cantidad</th>
+                      <th className="py-2.5 px-3 text-right w-28">Precio Unit.</th>
+                      <th className="py-2.5 px-3 text-right w-28">Subtotal</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-stone-800/80">
+                    {activeDetailsPedido.Items.map((item, idx) => (
+                      <tr key={idx} className="hover:bg-stone-900/40">
+                        <td className="py-2.5 px-3 font-medium text-stone-200">
+                          {item.platoNombre}
+                        </td>
+                        <td className="py-2.5 px-3 text-center font-black font-mono text-amber-400">
+                          {item.cantidad}
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-mono text-stone-400">
+                          {formatCurrency(item.precioUnitario)}
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-mono font-bold text-stone-200">
+                          {formatCurrency(item.precioUnitario * item.cantidad)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="bg-stone-900/80 border-t border-stone-700">
+                    <tr>
+                      <td colSpan={3} className="py-3 px-3 text-right font-black uppercase text-stone-300">
+                        Monto Total del Pedido:
+                      </td>
+                      <td className="py-3 px-3 text-right font-black text-sm font-mono text-emerald-400">
+                        {formatCurrency(activeDetailsPedido.Total)}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+
+            {/* Original WhatsApp Message Container */}
+            {activeDetailsPedido.MensajeOriginal && (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-xs text-stone-400">
+                  <span className="font-bold uppercase tracking-wider text-[10px] text-stone-400 flex items-center space-x-1">
+                    <FileText className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Texto Original de WhatsApp</span>
+                  </span>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(activeDetailsPedido.MensajeOriginal);
+                      showToast('Texto copiado al portapapeles');
+                    }}
+                    className="text-[11px] text-emerald-400 hover:text-emerald-300 flex items-center space-x-1"
+                  >
+                    <Copy className="w-3 h-3" />
+                    <span>Copiar texto</span>
+                  </button>
+                </div>
+                <div className="bg-stone-950 p-3 rounded-xl border border-stone-800 text-xs font-mono text-stone-300 whitespace-pre-wrap max-h-36 overflow-y-auto">
+                  {activeDetailsPedido.MensajeOriginal}
+                </div>
+              </div>
+            )}
+
+            {/* Modal Actions Footer */}
+            <div className="pt-3 border-t border-stone-800 flex flex-wrap items-center justify-between gap-2 text-xs">
+              <div className="flex items-center space-x-2">
+                {/* Delete */}
+                <button
+                  onClick={() => {
+                    handleDelete(activeDetailsPedido.Id);
+                    setSelectedDetailsPedido(null);
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-stone-800 hover:bg-rose-950 hover:text-rose-400 text-stone-400 border border-stone-700 transition-colors flex items-center space-x-1"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Eliminar Pedido</span>
+                </button>
+
+                {/* POS Cart */}
+                {onLoadOrderToCart && (
+                  <button
+                    onClick={() => handleLoadToCart(activeDetailsPedido)}
+                    className="px-3 py-1.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700 transition-colors flex items-center space-x-1"
+                  >
+                    <ShoppingBag className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Cargar en POS</span>
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center space-x-2">
+                {/* Send to Kitchen if Pending */}
+                {activeDetailsPedido.Estado === 'Pendiente' && (
+                  <button
+                    onClick={() => {
+                      handleConvertToComanda(activeDetailsPedido);
+                      setSelectedDetailsPedido(null);
+                    }}
+                    className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-black shadow-md shadow-amber-500/20 flex items-center space-x-1.5 transition-all"
+                  >
+                    <ChefHat className="w-3.5 h-3.5" />
+                    <span>Mandar a Cocina</span>
+                  </button>
+                )}
+
+                {/* Deliver if In Kitchen */}
+                {activeDetailsPedido.Estado === 'En Cocina' && (
+                  <button
+                    onClick={() => handleChangeStatus(activeDetailsPedido.Id, 'Entregado')}
+                    className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold flex items-center space-x-1.5"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Marcar Entregado</span>
+                  </button>
+                )}
+
+                {/* Cobrar if Kitchen or Entregado */}
+                {(activeDetailsPedido.Estado === 'En Cocina' || activeDetailsPedido.Estado === 'Entregado') && (
+                  <button
+                    onClick={() => handleChangeStatus(activeDetailsPedido.Id, 'Cobrado')}
+                    className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-stone-950 font-bold flex items-center space-x-1.5 shadow-md shadow-emerald-600/20"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Marcar Cobrado</span>
+                  </button>
+                )}
+
+                {/* Close Button */}
+                <button
+                  onClick={() => setSelectedDetailsPedido(null)}
+                  className="px-4 py-1.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 font-semibold"
+                >
+                  Cerrar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* SUB-MODAL 1: QR CODE DISPLAY & FLYER PRINTING */}
       <WhatsAppQrModal

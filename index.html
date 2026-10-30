@@ -118,8 +118,38 @@
       }
     </style>
     <script>
+      // Polyfill / configure window.fetch with a setter so Chrome extensions, proxies, or wrappers
+      // can safely assign window.fetch without throwing "Cannot set property fetch of #<Window> which has only a getter"
+      (function() {
+        try {
+          var realFetch = window.fetch ? window.fetch.bind(window) : null;
+          var proto = window;
+          var desc = Object.getOwnPropertyDescriptor(proto, 'fetch');
+          if (!desc) {
+            proto = Window.prototype;
+            desc = Object.getOwnPropertyDescriptor(proto, 'fetch');
+          }
+          if (desc && !desc.set) {
+            Object.defineProperty(window, 'fetch', {
+              get: function() {
+                return realFetch;
+              },
+              set: function(val) {
+                realFetch = val;
+              },
+              configurable: true,
+              enumerable: true
+            });
+          }
+        } catch (e) {
+          // Fallback or ignore if cannot reconfigure
+        }
+      })();
+
       // Global error catcher to guarantee the screen is never blank
       window.__tb_has_error = false;
+      window.__tb_app_mounted = false;
+
       function showStartupDiagnostic(message, detail) {
         window.__tb_has_error = true;
         console.error('[Terreno Broaster Startup Error]:', message, detail);
@@ -143,18 +173,46 @@
       }
 
       window.onerror = function(msg, url, line, col, err) {
-        showStartupDiagnostic(String(msg), err);
+        var msgStr = String(msg || '');
+        var urlStr = String(url || '');
+        // Filter out errors caused by external browser extensions or fetch setter attempts
+        if (
+          urlStr.indexOf('chrome-extension://') !== -1 ||
+          urlStr.indexOf('moz-extension://') !== -1 ||
+          msgStr.indexOf('Cannot set property fetch') !== -1 ||
+          msgStr.indexOf('ResizeObserver') !== -1
+        ) {
+          console.warn('[Ignored browser extension / ambient error]:', msg, url);
+          return true;
+        }
+
+        // Only display startup error screen if application has not mounted yet
+        if (!window.__tb_app_mounted) {
+          showStartupDiagnostic(msgStr, err);
+        }
       };
 
       window.onunhandledrejection = function(e) {
         var reason = e && e.reason ? (e.reason.message || String(e.reason)) : 'Rechazo asíncrono no capturado';
-        showStartupDiagnostic('Error asíncrono: ' + reason, e.reason);
+        if (
+          reason.indexOf('chrome-extension://') !== -1 ||
+          reason.indexOf('moz-extension://') !== -1 ||
+          reason.indexOf('Cannot set property fetch') !== -1
+        ) {
+          console.warn('[Ignored browser extension async rejection]:', reason);
+          return true;
+        }
+        if (!window.__tb_app_mounted) {
+          showStartupDiagnostic('Error asíncrono: ' + reason, e.reason);
+        }
       };
 
-      // Show manual reload button if loading exceeds 4 seconds
+      // Show manual reload button if loading exceeds 4 seconds and app hasn't mounted
       setTimeout(function() {
-        var btn = document.getElementById('preloader-reload-btn');
-        if (btn) btn.style.display = 'block';
+        if (!window.__tb_app_mounted) {
+          var btn = document.getElementById('preloader-reload-btn');
+          if (btn) btn.style.display = 'block';
+        }
       }, 4000);
     </script>
   </head>
