@@ -92,10 +92,30 @@ function isCustomerPortal(): boolean {
   );
 }
 
-const root = createRoot(document.getElementById('root')!);
+function mountApp() {
+  try {
+    const container = document.getElementById('root');
+    if (!container) {
+      console.error('Target container #root not found in document');
+      return;
+    }
+    const root = createRoot(container);
+    root.render(
+      <ErrorBoundary>
+        {isCustomerPortal() ? <CustomerApp /> : <App />}
+      </ErrorBoundary>
+    );
+  } catch (err: any) {
+    console.error('Fatal initialization error in main.tsx:', err);
+    if (typeof (window as any).showStartupDiagnostic === 'function') {
+      (window as any).showStartupDiagnostic('Error al inicializar la aplicación: ' + (err?.message || err), err);
+    }
+  }
+}
 
-root.render(
-  <ErrorBoundary>
-    {isCustomerPortal() ? <CustomerApp /> : <App />}
-  </ErrorBoundary>
-);
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', mountApp);
+} else {
+  mountApp();
+}
+

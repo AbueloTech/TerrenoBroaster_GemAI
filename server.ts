@@ -407,16 +407,26 @@ async function createServer() {
     }
   });
 
-  // --- VITE MIDDLEWARE (Dev) or Static Files (Prod) ---
+  // --- STATIC ASSETS & VITE MIDDLEWARE ---
   const distPath = path.resolve(process.cwd(), 'dist');
   const hasDist = fs.existsSync(distPath) && fs.existsSync(path.join(distPath, 'index.html'));
 
-  if (isProduction && hasDist) {
-    app.use(express.static(distPath));
+  if (fs.existsSync(path.join(distPath, 'assets'))) {
+    app.use('/assets', express.static(path.join(distPath, 'assets'), {
+      maxAge: '1d',
+      immutable: true,
+    }));
+  }
+
+  if (hasDist) {
+    console.log('[Server] Sirviendo build compilado optimizado desde dist/');
+    app.use(express.static(distPath, { index: false }));
     app.get('*', (req, res) => {
+      res.setHeader('Cache-Control', 'no-cache');
       res.sendFile(path.join(distPath, 'index.html'));
     });
   } else {
+    console.log('[Server] Iniciando middleware de desarrollo Vite...');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',

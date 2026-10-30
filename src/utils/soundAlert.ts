@@ -57,6 +57,8 @@ export const AVAILABLE_ALERT_SOUNDS: SoundOption[] = [
   },
 ];
 
+import { safeStorage } from './safeStorage';
+
 export interface SoundSettings {
   soundType: AlertSoundType;
   volume: number; // 0 to 100
@@ -69,10 +71,10 @@ const STORAGE_KEY_ENABLED = 'tb_whatsapp_sound_enabled';
 
 export function getSoundSettings(): SoundSettings {
   try {
-    const soundType = (localStorage.getItem(STORAGE_KEY_TYPE) as AlertSoundType) || 'ding_dong';
-    const volumeRaw = localStorage.getItem(STORAGE_KEY_VOL);
+    const soundType = (safeStorage.getItem(STORAGE_KEY_TYPE) as AlertSoundType) || 'ding_dong';
+    const volumeRaw = safeStorage.getItem(STORAGE_KEY_VOL);
     const volume = volumeRaw !== null ? Math.min(100, Math.max(0, parseInt(volumeRaw, 10))) : 85;
-    const enabledRaw = localStorage.getItem(STORAGE_KEY_ENABLED);
+    const enabledRaw = safeStorage.getItem(STORAGE_KEY_ENABLED);
     const enabled = enabledRaw !== null ? enabledRaw === 'true' : true;
 
     return { soundType, volume, enabled };
@@ -85,9 +87,9 @@ export function saveSoundSettings(settings: Partial<SoundSettings>): SoundSettin
   try {
     const current = getSoundSettings();
     const updated: SoundSettings = { ...current, ...settings };
-    localStorage.setItem(STORAGE_KEY_TYPE, updated.soundType);
-    localStorage.setItem(STORAGE_KEY_VOL, String(updated.volume));
-    localStorage.setItem(STORAGE_KEY_ENABLED, String(updated.enabled));
+    safeStorage.setItem(STORAGE_KEY_TYPE, updated.soundType);
+    safeStorage.setItem(STORAGE_KEY_VOL, String(updated.volume));
+    safeStorage.setItem(STORAGE_KEY_ENABLED, String(updated.enabled));
     return updated;
   } catch {
     return getSoundSettings();

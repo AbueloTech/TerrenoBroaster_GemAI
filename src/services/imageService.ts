@@ -1,4 +1,5 @@
 import { SAMPLE_FALLBACK_IMAGES } from '../data/defaultData';
+import { safeStorage } from '../utils/safeStorage';
 
 class ImageService {
   private localImageMap: Map<string, string> = new Map();
@@ -7,10 +8,10 @@ class ImageService {
   private isSyncingToServer: boolean = false;
 
   constructor() {
-    // 1. Restore cached thumbnails from localStorage if present
+    // 1. Restore cached thumbnails from safeStorage if present
     try {
       if (typeof window !== 'undefined') {
-        const stored = localStorage.getItem('tb_pos_images');
+        const stored = safeStorage.getItem('tb_pos_images');
         if (stored) {
           const parsed = JSON.parse(stored);
           Object.entries(parsed).forEach(([k, v]) => {
@@ -21,6 +22,7 @@ class ImageService {
     } catch (e) {
       console.warn('Could not load stored images:', e);
     }
+
 
     // 2. Fetch server image manifest on load
     this.refreshServerManifest();
@@ -81,12 +83,12 @@ class ImageService {
     reader.onload = () => {
       try {
         const dataUrl = reader.result as string;
-        // Save to localStorage for quick restarts
+        // Save to safeStorage for quick restarts
         if (file.size < 2 * 1024 * 1024) {
-          const stored = localStorage.getItem('tb_pos_images');
+          const stored = safeStorage.getItem('tb_pos_images');
           const data = stored ? JSON.parse(stored) : {};
           data[filename] = dataUrl;
-          localStorage.setItem('tb_pos_images', JSON.stringify(data));
+          safeStorage.setItem('tb_pos_images', JSON.stringify(data));
         }
 
         // Upload directly to server
@@ -162,7 +164,7 @@ class ImageService {
   public async syncStoredImagesToServer(): Promise<void> {
     if (this.isSyncingToServer || typeof window === 'undefined') return;
     try {
-      const stored = localStorage.getItem('tb_pos_images');
+      const stored = safeStorage.getItem('tb_pos_images');
       if (!stored) return;
       const parsed = JSON.parse(stored);
       if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) {
@@ -397,9 +399,7 @@ class ImageService {
 
   public clearLoaded() {
     this.localImageMap.clear();
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('tb_pos_images');
-    }
+    safeStorage.removeItem('tb_pos_images');
     this.notify();
   }
 }

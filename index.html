@@ -1,18 +1,180 @@
 <!doctype html>
-<html lang="en">
+<html lang="es">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Terreno Broaster - POS Restaurante</title>
-    <meta name="description" content="Sistema POS de Restaurante para Terreno Broaster con CRUD de Platos, Punto de Venta, Historial de Ventas, Consolidado de Productos y Formas de Pago, Dashboard interactivo y soporte de base de datos SQLite." />
+    <meta name="description" content="Sistema POS de Restaurante para Terreno Broaster con CRUD de Platos, Punto de Venta, Historial de Ventas, Inventario, Recetas, Escandallos, Consolidado de Productos y Formas de Pago, Dashboard interactivo y base de datos SQLite." />
     <meta property="og:title" content="Terreno Broaster - POS Restaurante" />
-    <meta property="og:description" content="Sistema POS de Restaurante para Terreno Broaster con CRUD de Platos, Punto de Venta, Historial de Ventas, Consolidado de Productos y Formas de Pago, Dashboard interactivo y soporte de base de datos SQLite." />
+    <meta property="og:description" content="Sistema POS de Restaurante para Terreno Broaster con CRUD de Platos, Punto de Venta, Historial de Ventas, Inventario, Recetas, Escandallos, Consolidado de Productos y Formas de Pago, Dashboard interactivo y base de datos SQLite." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
+    <style>
+      html, body {
+        background-color: #0c0a09;
+        color: #f5f5f4;
+        margin: 0;
+        padding: 0;
+        min-height: 100vh;
+        width: 100%;
+        overflow-x: hidden;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      #root {
+        min-height: 100vh;
+        width: 100%;
+      }
+      .preloader-container {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background-color: #0c0a09;
+        padding: 20px;
+        box-sizing: border-box;
+      }
+      .preloader-card {
+        max-width: 420px;
+        width: 100%;
+        background: #1c1917;
+        border: 1px solid #292524;
+        border-radius: 24px;
+        padding: 36px 28px;
+        text-align: center;
+        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+      }
+      .preloader-logo {
+        width: 68px;
+        height: 68px;
+        margin: 0 auto 20px;
+        border-radius: 20px;
+        background: linear-gradient(135deg, #f59e0b, #d97706);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 32px;
+        font-weight: 900;
+        color: #0c0a09;
+        box-shadow: 0 10px 25px -5px rgba(245, 158, 11, 0.4);
+      }
+      .preloader-title {
+        font-size: 22px;
+        font-weight: 900;
+        color: #ffffff;
+        margin: 0 0 6px 0;
+        letter-spacing: -0.02em;
+      }
+      .preloader-subtitle {
+        font-size: 13px;
+        color: #a8a29e;
+        margin: 0 0 24px 0;
+      }
+      .preloader-bar-bg {
+        width: 100%;
+        height: 6px;
+        background: #292524;
+        border-radius: 999px;
+        overflow: hidden;
+        position: relative;
+        margin-bottom: 14px;
+      }
+      .preloader-bar-fill {
+        position: absolute;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        width: 45%;
+        background: linear-gradient(90deg, #f59e0b, #fbbf24);
+        border-radius: 999px;
+        animation: preloader-anim 1.4s ease-in-out infinite alternate;
+      }
+      @keyframes preloader-anim {
+        0% { left: 0%; width: 25%; }
+        100% { left: 70%; width: 30%; }
+      }
+      .preloader-status {
+        font-size: 12px;
+        color: #78716c;
+        margin: 0;
+      }
+      .preloader-btn {
+        margin-top: 20px;
+        display: none;
+        width: 100%;
+        padding: 12px 16px;
+        border-radius: 12px;
+        background: #292524;
+        color: #d6d3d1;
+        border: 1px solid #44403c;
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+        transition: background 0.2s;
+      }
+      .preloader-btn:hover {
+        background: #44403c;
+        color: #ffffff;
+      }
+    </style>
+    <script>
+      // Global error catcher to guarantee the screen is never blank
+      window.__tb_has_error = false;
+      function showStartupDiagnostic(message, detail) {
+        window.__tb_has_error = true;
+        console.error('[Terreno Broaster Startup Error]:', message, detail);
+        var root = document.getElementById('root');
+        if (root) {
+          root.innerHTML = '' +
+            '<div style="min-height:100vh;background:#0c0a09;color:#fff;display:flex;align-items:center;justify-content:center;padding:20px;font-family:system-ui,-apple-system,sans-serif;">' +
+              '<div style="max-width:440px;width:100%;background:#1c1917;border:1px solid #dc2626;border-radius:24px;padding:32px 24px;text-align:center;box-shadow:0 25px 50px -12px rgba(0,0,0,0.8);">' +
+                '<div style="width:56px;height:56px;margin:0 auto 16px;border-radius:16px;background:rgba(239,68,68,0.15);border:1px solid #ef4444;display:flex;align-items:center;justify-content:center;font-size:28px;">⚠️</div>' +
+                '<h2 style="font-size:18px;font-weight:900;margin:0 0 8px 0;color:#fff;">Terreno Broaster</h2>' +
+                '<p style="font-size:12px;color:#a8a29e;margin:0 0 16px 0;line-height:1.5;">Ocurrió un aviso al cargar el navegador. Puedes reiniciar la aplicación con el botón a continuación:</p>' +
+                '<div style="background:#0c0a09;border:1px solid #292524;border-radius:12px;padding:12px;color:#fca5a5;font-family:monospace;font-size:11px;text-align:left;overflow-x:auto;max-height:120px;margin-bottom:20px;">' +
+                  (message || 'Error desconocido') +
+                '</div>' +
+                '<button onclick="localStorage.clear();window.location.reload(true)" style="width:100%;padding:14px;background:#f59e0b;color:#0c0a09;font-weight:900;border:none;border-radius:12px;cursor:pointer;font-size:13px;">' +
+                  'Reiniciar y Recargar Aplicación' +
+                '</button>' +
+              '</div>' +
+            '</div>';
+        }
+      }
+
+      window.onerror = function(msg, url, line, col, err) {
+        showStartupDiagnostic(String(msg), err);
+      };
+
+      window.onunhandledrejection = function(e) {
+        var reason = e && e.reason ? (e.reason.message || String(e.reason)) : 'Rechazo asíncrono no capturado';
+        showStartupDiagnostic('Error asíncrono: ' + reason, e.reason);
+      };
+
+      // Show manual reload button if loading exceeds 4 seconds
+      setTimeout(function() {
+        var btn = document.getElementById('preloader-reload-btn');
+        if (btn) btn.style.display = 'block';
+      }, 4000);
+    </script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div class="preloader-container">
+        <div class="preloader-card">
+          <div class="preloader-logo">🍗</div>
+          <h1 class="preloader-title">Terreno Broaster</h1>
+          <p class="preloader-subtitle">Sistema POS & Gestión Gastronómica</p>
+          <div class="preloader-bar-bg">
+            <div class="preloader-bar-fill"></div>
+          </div>
+          <p class="preloader-status">Iniciando módulos y base de datos...</p>
+          <button id="preloader-reload-btn" class="preloader-btn" onclick="window.location.reload(true)">
+            ¿Tarda en cargar? Haz clic para recargar
+          </button>
+        </div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

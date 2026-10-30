@@ -1,34 +1,54 @@
 /**
  * Safe localStorage wrapper that gracefully handles blocked storage in iframes,
- * private browsing modes, or security restrictions.
+ * private browsing modes, or third-party cookie restrictions.
+ * Falls back to an in-memory dictionary if localStorage throws SecurityError or DOMException.
  */
+const memoryStore: Record<string, string> = {};
+
 export const safeStorage = {
   getItem: (key: string): string | null => {
     try {
-      if (typeof window === 'undefined') return null;
-      return window.localStorage ? window.localStorage.getItem(key) : null;
+      if (typeof window !== 'undefined' && 'localStorage' in window) {
+        const val = window.localStorage.getItem(key);
+        if (val !== null) return val;
+      }
     } catch {
-      return null;
+      // Storage restricted or blocked in iframe
     }
+    return memoryStore[key] !== undefined ? memoryStore[key] : null;
   },
 
   setItem: (key: string, value: string): void => {
     try {
-      if (typeof window !== 'undefined' && window.localStorage) {
+      memoryStore[key] = value;
+      if (typeof window !== 'undefined' && 'localStorage' in window) {
         window.localStorage.setItem(key, value);
       }
     } catch {
-      // Storage might be blocked in iframe or quota exceeded; ignore safely
+      // Quota exceeded or iframe security restriction; memoryStore has it
     }
   },
 
   removeItem: (key: string): void => {
     try {
-      if (typeof window !== 'undefined' && window.localStorage) {
+      delete memoryStore[key];
+      if (typeof window !== 'undefined' && 'localStorage' in window) {
         window.localStorage.removeItem(key);
       }
     } catch {
       // ignore
     }
   },
+
+  clear: (): void => {
+    try {
+      Object.keys(memoryStore).forEach((k) => delete memoryStore[k]);
+      if (typeof window !== 'undefined' && 'localStorage' in window) {
+        window.localStorage.clear();
+      }
+    } catch {
+      // ignore
+    }
+  },
 };
+
