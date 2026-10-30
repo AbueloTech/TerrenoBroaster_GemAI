@@ -124,55 +124,74 @@ export const ComandasMonitorView: React.FC<ComandasMonitorViewProps> = ({
   const getElapsedSeconds = (horaCreacion: string, fechaStr?: string): number => {
     if (!horaCreacion && !fechaStr) return 0;
     try {
-      // 1. If horaCreacion has full ISO format
+      const nowMs = currentTime.getTime();
+
+      // 1. Prioritize horaCreacion if it contains time components (HH:mm or HH:mm:ss)
+      const cleanTime = (horaCreacion || '').trim();
+      if (cleanTime && cleanTime.includes(':')) {
+        const timeParts = cleanTime.split(':').map((p) => parseInt(p, 10));
+        if (timeParts.length >= 2 && !isNaN(timeParts[0]) && !isNaN(timeParts[1])) {
+          const h = timeParts[0];
+          const m = timeParts[1];
+          const s = timeParts[2] && !isNaN(timeParts[2]) ? timeParts[2] : 0;
+
+          const orderDate = new Date(currentTime);
+          if (fechaStr && fechaStr.includes('-')) {
+            const dateOnly = fechaStr.split(' ')[0].split('T')[0];
+            const dp = dateOnly.split('-').map(Number);
+            if (dp.length === 3 && dp[0] > 2000) {
+              orderDate.setFullYear(dp[0], dp[1] - 1, dp[2]);
+            }
+          }
+
+          orderDate.setHours(h, m, s, 0);
+          let diffMs = nowMs - orderDate.getTime();
+
+          // Handle UTC vs local timezone difference if order was generated with UTC offset
+          if (diffMs < 0) {
+            const tzDiff = currentTime.getTimezoneOffset() * 60 * 1000;
+            if (diffMs + tzDiff >= 0) {
+              diffMs += tzDiff;
+            } else if (diffMs - tzDiff >= 0) {
+              diffMs -= tzDiff;
+            } else {
+              diffMs = 0;
+            }
+          }
+
+          return Math.max(0, Math.floor(diffMs / 1000));
+        }
+      }
+
+      // 2. If horaCreacion has full ISO format
       if (horaCreacion && horaCreacion.includes('T')) {
         const parsedIso = Date.parse(horaCreacion);
         if (!isNaN(parsedIso)) {
-          return Math.max(0, Math.floor((currentTime.getTime() - parsedIso) / 1000));
+          let diffMs = nowMs - parsedIso;
+          if (diffMs < 0) {
+            const tzDiff = currentTime.getTimezoneOffset() * 60 * 1000;
+            if (diffMs + tzDiff >= 0) diffMs += tzDiff;
+          }
+          return Math.max(0, Math.floor(diffMs / 1000));
         }
       }
 
-      // 2. If fechaStr has full ISO or datetime 'YYYY-MM-DD HH:mm:ss'
-      if (fechaStr && fechaStr.includes(':')) {
-        const parsedDt = Date.parse(fechaStr.replace(' ', 'T'));
+      // 3. Fallback: Parse fechaStr datetime
+      if (fechaStr) {
+        let isoStr = fechaStr.trim();
+        if (isoStr.includes(' ') && !isoStr.includes('T')) {
+          isoStr = isoStr.replace(' ', 'T');
+        }
+        const parsedDt = Date.parse(isoStr);
         if (!isNaN(parsedDt)) {
-          return Math.max(0, Math.floor((currentTime.getTime() - parsedDt) / 1000));
-        }
-      }
-
-      // 3. Parse time components (HH:mm or HH:mm:ss)
-      const cleanTime = (horaCreacion || '').trim();
-      const timeParts = cleanTime.split(':').map((p) => parseInt(p, 10));
-      if (timeParts.length >= 2 && !isNaN(timeParts[0]) && !isNaN(timeParts[1])) {
-        const h = timeParts[0];
-        const m = timeParts[1];
-        const s = timeParts[2] && !isNaN(timeParts[2]) ? timeParts[2] : 0;
-
-        const orderDate = new Date(currentTime);
-        if (fechaStr && fechaStr.includes('-')) {
-          const dateOnly = fechaStr.split(' ')[0];
-          const dp = dateOnly.split('-').map(Number);
-          if (dp.length === 3 && dp[0] > 2000) {
-            orderDate.setFullYear(dp[0], dp[1] - 1, dp[2]);
+          let diffMs = nowMs - parsedDt;
+          if (diffMs < 0) {
+            const tzDiff = currentTime.getTimezoneOffset() * 60 * 1000;
+            if (diffMs + tzDiff >= 0) diffMs += tzDiff;
+            else if (diffMs - tzDiff >= 0) diffMs -= tzDiff;
           }
+          return Math.max(0, Math.floor(diffMs / 1000));
         }
-
-        orderDate.setHours(h, m, s, 0);
-        let diffMs = currentTime.getTime() - orderDate.getTime();
-
-        // If diffMs is negative due to UTC vs Local Time differences, compensate
-        if (diffMs < 0) {
-          const tzDiff = currentTime.getTimezoneOffset() * 60 * 1000;
-          if (diffMs + tzDiff >= 0) {
-            diffMs += tzDiff;
-          } else if (diffMs - tzDiff >= 0) {
-            diffMs -= tzDiff;
-          } else {
-            diffMs = 0;
-          }
-        }
-
-        return Math.max(0, Math.floor(diffMs / 1000));
       }
 
       return 0;

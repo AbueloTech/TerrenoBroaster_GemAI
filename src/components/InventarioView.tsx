@@ -545,23 +545,30 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
             {/* Direct Local SQLite Linker Status */}
             <div className="flex flex-wrap items-center gap-2">
               {isLocalLinked ? (
-                <div className="flex items-center space-x-2 px-3.5 py-2 rounded-xl bg-emerald-950/70 border border-emerald-500/40 text-emerald-300 text-xs shadow-inner">
+                <div className="flex items-center space-x-2 px-3.5 py-1.5 rounded-xl bg-emerald-950/70 border border-emerald-500/40 text-emerald-300 text-xs shadow-inner">
                   <HardDrive className="w-4 h-4 text-emerald-400 animate-pulse" />
                   <div>
-                    <span className="font-bold block leading-none">Guardado directo en disco:</span>
+                    <span className="font-bold block leading-none">Base de datos vinculada:</span>
                     <span className="text-[11px] text-emerald-200/80 font-mono truncate max-w-[180px] block">
                       {linkedFileName || 'TerrenoBroaster.db'}
                     </span>
                   </div>
+                  <button
+                    onClick={handleLinkLocalFile}
+                    className="text-[10px] text-emerald-400 hover:text-white underline ml-1 cursor-pointer"
+                    title="Cargar otro archivo .db de base de datos"
+                  >
+                    Cambiar
+                  </button>
                 </div>
               ) : (
                 <button
                   onClick={handleLinkLocalFile}
-                  title="Vincular archivo TerrenoBroaster.db local para guardar automáticamente directo en disco"
+                  title="Cargar o vincular archivo TerrenoBroaster.db desde tu disco o almacenamiento local"
                   className="flex items-center space-x-2 px-3.5 py-2 rounded-xl bg-stone-800 hover:bg-stone-700 border border-stone-700 hover:border-amber-400/50 text-stone-200 hover:text-white text-xs font-bold transition-all shadow-sm active:scale-95 cursor-pointer"
                 >
                   <HardDrive className="w-4 h-4 text-amber-400" />
-                  <span>Vincular .db en disco</span>
+                  <span>Cargar / Vincular .db</span>
                 </button>
               )}
 

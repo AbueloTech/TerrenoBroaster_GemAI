@@ -407,7 +407,7 @@ export function parseWhatsAppMessage(
 export function buildWhatsAppReplyUrl(
   phoneNumber: string,
   pedido: PedidoWhatsApp,
-  tipoMensaje: 'recibido' | 'en_camino' | 'listo_retiro' | 'personalizado',
+  tipoMensaje: 'recibido' | 'en_cocina' | 'en_camino' | 'listo_retiro' | 'cobrado' | 'personalizado',
   customText?: string
 ): string {
   const cleanPhone = phoneNumber.replace(/[^\d]/g, '');
@@ -417,24 +417,36 @@ export function buildWhatsAppReplyUrl(
 
   if (tipoMensaje === 'recibido') {
     text = `¡Hola *${pedido.NombreCliente}*! 👋🍗\n\n` +
-      `Recibimos tu pedido en *TERRENO BROASTER*:\n` +
-      `${itemsSummary}\n\n` +
+      `¡Su pedido ha sido recibido con éxito en *TERRENO BROASTER*!\n\n` +
+      `*Detalle de su pedido:*\n${itemsSummary}\n\n` +
       `💰 *Total:* $${pedido.Total.toFixed(2)}\n` +
-      `🛵 *Entrega:* ${pedido.TipoEntrega}${pedido.DireccionEntrega ? ` (${pedido.DireccionEntrega})` : ''}\n` +
-      `💳 *Pago:* ${pedido.FormaPago}\n` +
-      `⏱️ *Estado:* ¡Tu pedido ya está en preparación en cocina!\n\n` +
-      `¡Muchas gracias por preferirnos! Te avisaremos apenas esté listo. 🔥`;
+      `🛵 *Modalidad:* ${pedido.TipoEntrega}${pedido.DireccionEntrega ? ` (${pedido.DireccionEntrega})` : ''}\n` +
+      `💳 *Forma de Pago:* ${pedido.FormaPago}\n\n` +
+      `¡Muchas gracias por su preferencia! En breve lo enviaremos a cocina. 🔥`;
+  } else if (tipoMensaje === 'en_cocina') {
+    text = `¡Hola *${pedido.NombreCliente}*! 👨‍🍳🔥\n\n` +
+      `Su pedido está siendo procesado en la Cocina de *TERRENO BROASTER*:\n\n` +
+      `*Platos en preparación:*\n${itemsSummary}\n\n` +
+      (pedido.NTicket ? `🏷️ *N° Ticket:* ${pedido.NTicket}\n` : '') +
+      `⏱️ Nuestro equipo ya está cocinando todo crujiente y caliente.\n\n` +
+      `Le notificaremos en cuanto esté listo. ¡Muchas gracias por su paciencia! ✨`;
   } else if (tipoMensaje === 'en_camino') {
     text = `¡Hola *${pedido.NombreCliente}*! 🛵💨\n\n` +
-      `Tu pedido de *TERRENO BROASTER* va *EN CAMINO* a tu dirección:\n` +
-      `📍 ${pedido.DireccionEntrega || 'Dirección registrada'}\n\n` +
-      `💵 Recuerda tener listo tu pago: $${pedido.Total.toFixed(2)} (${pedido.FormaPago})\n` +
-      `¡Buen provecho! 🍗✨`;
+      `Tu pedido de *TERRENO BROASTER* va en camino, por favor estar pendiente.\n\n` +
+      `📍 *Dirección de Entrega:* ${pedido.DireccionEntrega || 'Dirección registrada'}\n` +
+      `💵 *Monto Total:* $${pedido.Total.toFixed(2)} (${pedido.FormaPago})\n\n` +
+      `¡Buen provecho y muchas gracias por su compra! 🍗✨`;
   } else if (tipoMensaje === 'listo_retiro') {
     text = `¡Hola *${pedido.NombreCliente}*! 🛍️✨\n\n` +
-      `Tu pedido ya está *LISTO PARA RETIRAR* en el restaurante *TERRENO BROASTER* caliente y crujiente.\n` +
-      `Ticket: *${pedido.NTicket || 'WA-' + pedido.Id}*\n\n` +
-      `¡Te esperamos! 🍗🔥`;
+      `Tu pedido de *TERRENO BROASTER* ya ha salido de cocina y está *LISTO PARA RETIRAR* en nuestro restaurante, caliente y crujiente.\n\n` +
+      (pedido.NTicket ? `🏷️ *N° Ticket:* ${pedido.NTicket}\n` : '') +
+      `¡Te esperamos para entregártelo! 🍗🔥`;
+  } else if (tipoMensaje === 'cobrado') {
+    text = `¡Hola *${pedido.NombreCliente}*! ✅🍗\n\n` +
+      `Su pedido en *TERRENO BROASTER* ha sido completado y cobrado con éxito.\n` +
+      (pedido.NTicket ? `🏷️ *N° Ticket:* ${pedido.NTicket} | ` : '') +
+      `Total: $${pedido.Total.toFixed(2)} (${pedido.FormaPago})\n\n` +
+      `¡Esperamos que disfrute su comida y que vuelva pronto! ⭐`;
   } else if (customText) {
     text = customText;
   }

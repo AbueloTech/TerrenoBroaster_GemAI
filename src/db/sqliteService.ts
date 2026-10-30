@@ -79,35 +79,92 @@ class SQLiteService {
    * Once linked, every single change will write directly to their physical file on disk!
    */
   public async linkLocalDatabaseFile(): Promise<{ success: boolean; filename?: string; error?: string }> {
-    if (typeof window === 'undefined' || !('showOpenFilePicker' in window)) {
-      return {
-        success: false,
-        error: 'Tu navegador no soporta vinculación directa de archivos. Usa el botón "Descargar Base de Datos".',
-      };
-    }
-    try {
-      const [handle] = await (window as any).showOpenFilePicker({
-        types: [
-          {
-            description: 'Base de Datos SQLite (*.db)',
-            accept: { 'application/x-sqlite3': ['.db', '.sqlite', '.sqlite3'] },
-          },
-        ],
-        multiple: false,
-      });
+    // 1. If File System Access API is supported and we are not blocked by cross-origin iframe
+    const canTryNativePicker =
+      typeof window !== 'undefined' &&
+      'showOpenFilePicker' in window &&
+      typeof window.self !== 'undefined' &&
+      typeof window.top !== 'undefined' &&
+      window.self === window.top;
 
-      if (handle) {
-        this.localFileHandle = handle;
-        this.linkedFileName = handle.name;
-        const file = await handle.getFile();
-        await this.importDatabase(file);
-        return { success: true, filename: handle.name };
+    if (canTryNativePicker) {
+      try {
+        const [handle] = await (window as any).showOpenFilePicker({
+          types: [
+            {
+              description: 'Base de Datos SQLite (*.db)',
+              accept: { 'application/x-sqlite3': ['.db', '.sqlite', '.sqlite3'] },
+            },
+          ],
+          multiple: false,
+        });
+
+        if (handle) {
+          this.localFileHandle = handle;
+          this.linkedFileName = handle.name;
+          const file = await handle.getFile();
+          await this.importDatabase(file);
+          return { success: true, filename: handle.name };
+        }
+        return { success: false };
+      } catch (err: any) {
+        if (err.name === 'AbortError') return { success: false };
+        console.warn('showOpenFilePicker failed, falling back to standard file input:', err);
       }
-      return { success: false };
-    } catch (err: any) {
-      if (err.name === 'AbortError') return { success: false };
-      return { success: false, error: err.message };
     }
+
+    // 2. Universal standard fallback: HTML file input (works 100% inside iframes and cross-origin subframes)
+    return this.promptImportDatabaseFile();
+  }
+
+  /**
+   * Universal HTML5 File Picker that works without permission blocks in cross-origin iframes.
+   */
+  public async promptImportDatabaseFile(): Promise<{ success: boolean; filename?: string; error?: string }> {
+    return new Promise((resolve) => {
+      if (typeof document === 'undefined') {
+        resolve({ success: false, error: 'Entorno sin DOM disponible.' });
+        return;
+      }
+
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.db,.sqlite,.sqlite3';
+      input.style.display = 'none';
+
+      input.onchange = async () => {
+        const file = input.files?.[0];
+        if (!file) {
+          resolve({ success: false });
+          if (input.parentNode) document.body.removeChild(input);
+          return;
+        }
+
+        try {
+          await this.importDatabase(file);
+          this.linkedFileName = file.name;
+          this.notify();
+          resolve({ success: true, filename: file.name });
+        } catch (err: any) {
+          console.error('Error importing selected database:', err);
+          resolve({ success: false, error: `Error al leer ${file.name}: ${err?.message || err}` });
+        } finally {
+          if (input.parentNode) {
+            document.body.removeChild(input);
+          }
+        }
+      };
+
+      input.oncancel = () => {
+        resolve({ success: false });
+        if (input.parentNode) {
+          document.body.removeChild(input);
+        }
+      };
+
+      document.body.appendChild(input);
+      input.click();
+    });
   }
 
   /**
@@ -772,7 +829,9 @@ class SQLiteService {
   ): { comanda: Comanda; detalles: DetalleVenta[] } {
     const createdDetalles: DetalleVenta[] = [];
     const cleanTotal = safeParsePrice(comandaData.Monto);
-    const timeOnly = comandaData.HoraCreacion || new Date().toISOString().substring(11, 16);
+    const nowD = new Date();
+    const localTimeDefault = `${String(nowD.getHours()).padStart(2, '0')}:${String(nowD.getMinutes()).padStart(2, '0')}:${String(nowD.getSeconds()).padStart(2, '0')}`;
+    const timeOnly = comandaData.HoraCreacion || localTimeDefault;
 
     const activeDb = this.db;
     if (activeDb) {

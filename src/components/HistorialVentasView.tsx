@@ -1,8 +1,9 @@
 import React, { useState, useMemo } from 'react';
-import { Venta, DetalleVenta, AcumuladoProducto, AcumuladoFormaPago } from '../types';
+import { Venta, DetalleVenta, AcumuladoProducto, AcumuladoFormaPago, PlatoEscandallo } from '../types';
 import { sqliteService } from '../db/sqliteService';
 import { formatPrice, safeParsePrice } from '../utils/currency';
 import { TicketModal } from './TicketModal';
+import { PrintReportModal, ReportColumn, ReportSummaryCard } from './PrintReportModal';
 import {
   Calendar,
   Filter,
@@ -18,13 +19,19 @@ import {
   PieChart,
   Layers,
   Sparkles,
+  Printer,
+  DollarSign,
+  Calculator,
+  ArrowUpDown,
+  Check,
 } from 'lucide-react';
 
 interface HistorialVentasViewProps {
   onReopenTicket?: (venta: Venta, detalles: DetalleVenta[]) => void;
+  initialSubTab?: 'ventas' | 'acumulado_productos' | 'acumulado_pagos' | 'margen_ganancia';
 }
 
-export const HistorialVentasView: React.FC<HistorialVentasViewProps> = () => {
+export const HistorialVentasView: React.FC<HistorialVentasViewProps> = ({ initialSubTab = 'ventas' }) => {
   // Date range defaults: Last 30 days
   const todayStr = new Date().toISOString().split('T')[0];
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
@@ -35,7 +42,7 @@ export const HistorialVentasView: React.FC<HistorialVentasViewProps> = () => {
   const [selectedFormaPago, setSelectedFormaPago] = useState<string>('Todas');
 
   // Active view inside Historial
-  const [activeSubTab, setActiveSubTab] = useState<'ventas' | 'acumulado_productos' | 'acumulado_pagos'>('ventas');
+  const [activeSubTab, setActiveSubTab] = useState<'ventas' | 'acumulado_productos' | 'acumulado_pagos' | 'margen_ganancia'>(initialSubTab);
 
   // Details Modal State
   const [selectedTicketVenta, setSelectedTicketVenta] = useState<Venta | null>(null);
@@ -44,6 +51,11 @@ export const HistorialVentasView: React.FC<HistorialVentasViewProps> = () => {
 
   // Ticket Preview/Print Modal
   const [isTicketModalOpen, setIsTicketModalOpen] = useState(false);
+
+  // Printable Report Modal State
+  const [isPrintMargenReportOpen, setIsPrintMargenReportOpen] = useState(false);
+  const [sortMargenBy, setSortMargenBy] = useState<'ganancia' | 'margen' | 'cantidad' | 'venta'>('ganancia');
+  const [margenSearchQuery, setMargenSearchQuery] = useState<string>('');
 
   // Quick Date Helpers
   const setQuickRange = (range: 'hoy' | 'ayer' | 'semana' | 'mes' | 'todo') => {
@@ -108,6 +120,75 @@ export const HistorialVentasView: React.FC<HistorialVentasViewProps> = () => {
     setIsDetailsModalOpen(true);
   };
 
+  // Load escandallos for recipe food costs
+  const escandallos = useMemo(() => {
+    return sqliteService.getPlatosEscandallos();
+  }, []);
+
+  // Margen de Ganancia calculations for each product in date range
+  const margenProductos = useMemo(() => {
+    const list = acumuladoProductos.map((p) => {
+      const match = escandallos.find((e) => e.PlatoNombre.trim().toLowerCase() === p.Plato.trim().toLowerCase());
+      const tieneReceta = Boolean(match && match.TieneReceta && match.CostoTotalInsumos > 0);
+      const costoUnitario = tieneReceta && match ? match.CostoTotalInsumos : (match?.CostoTotalInsumos || Number((p.PrecioPromedio * 0.35).toFixed(2)));
+      const ventaTotal = p.MontoTotal;
+      const costoTotal = Number((p.CantidadTotal * costoUnitario).toFixed(2));
+      const gananciaTotal = Number((ventaTotal - costoTotal).toFixed(2));
+      const margenPorcentaje = ventaTotal > 0 ? Number(((gananciaTotal / ventaTotal) * 100).toFixed(1)) : 0;
+      const markupPorcentaje = costoTotal > 0 ? Number(((gananciaTotal / costoTotal) * 100).toFixed(1)) : 0;
+
+      return {
+        plato: p.Plato,
+        categoria: p.Categoria,
+        cantidad: p.CantidadTotal,
+        precioPromedio: p.PrecioPromedio,
+        costoUnitario,
+        tieneReceta,
+        ventaTotal,
+        costoTotal,
+        gananciaTotal,
+        margenPorcentaje,
+        markupPorcentaje,
+      };
+    });
+
+    const filtered = margenSearchQuery.trim()
+      ? list.filter(
+          (m) =>
+            m.plato.toLowerCase().includes(margenSearchQuery.toLowerCase()) ||
+            m.categoria.toLowerCase().includes(margenSearchQuery.toLowerCase())
+        )
+      : list;
+
+    return filtered.sort((a, b) => {
+      if (sortMargenBy === 'ganancia') return b.gananciaTotal - a.gananciaTotal;
+      if (sortMargenBy === 'margen') return b.margenPorcentaje - a.margenPorcentaje;
+      if (sortMargenBy === 'cantidad') return b.cantidad - a.cantidad;
+      if (sortMargenBy === 'venta') return b.ventaTotal - a.ventaTotal;
+      return b.gananciaTotal - a.gananciaTotal;
+    });
+  }, [acumuladoProductos, escandallos, margenSearchQuery, sortMargenBy]);
+
+  const totalVentasMargen = useMemo(() => {
+    return Number(margenProductos.reduce((acc, m) => acc + m.ventaTotal, 0).toFixed(2));
+  }, [margenProductos]);
+
+  const totalCostoMargen = useMemo(() => {
+    return Number(margenProductos.reduce((acc, m) => acc + m.costoTotal, 0).toFixed(2));
+  }, [margenProductos]);
+
+  const totalGananciaMargen = useMemo(() => {
+    return Number((totalVentasMargen - totalCostoMargen).toFixed(2));
+  }, [totalVentasMargen, totalCostoMargen]);
+
+  const margenGlobalPorcentaje = useMemo(() => {
+    return totalVentasMargen > 0 ? Number(((totalGananciaMargen / totalVentasMargen) * 100).toFixed(1)) : 0;
+  }, [totalVentasMargen, totalGananciaMargen]);
+
+  const totalUnidadesVendidas = useMemo(() => {
+    return margenProductos.reduce((acc, m) => acc + m.cantidad, 0);
+  }, [margenProductos]);
+
   // Export to CSV helper
   const handleExportCSV = () => {
     if (activeSubTab === 'ventas') {
@@ -122,6 +203,13 @@ export const HistorialVentasView: React.FC<HistorialVentasViewProps> = () => {
         csv += `"${p.Plato}","${p.Categoria}",${p.CantidadTotal},${p.PrecioPromedio},${p.MontoTotal}\n`;
       });
       downloadBlob(csv, `Acumulado_Productos_${fechaInicial}_al_${fechaFinal}.csv`);
+    } else if (activeSubTab === 'margen_ganancia') {
+      let csv = 'Plato,Categoria,CantidadVendida,PrecioVentaProm,CostoUnitario,TieneReceta,VentaTotal,CostoTotal,GananciaTotal,MargenPorcentaje,MarkupPorcentaje\n';
+      margenProductos.forEach((m) => {
+        csv += `"${m.plato}","${m.categoria}",${m.cantidad},${m.precioPromedio},${m.costoUnitario},"${m.tieneReceta ? 'SI' : 'ESTIMADO'}",${m.ventaTotal},${m.costoTotal},${m.gananciaTotal},${m.margenPorcentaje}%,${m.markupPorcentaje}%\n`;
+      });
+      csv += `\n"TOTALES","--",${totalUnidadesVendidas},"--","--","--",${totalVentasMargen},${totalCostoMargen},${totalGananciaMargen},"${margenGlobalPorcentaje}%","--"\n`;
+      downloadBlob(csv, `Margen_Ganancia_${fechaInicial}_al_${fechaFinal}.csv`);
     } else {
       let csv = 'FormaPago,Transacciones,MontoTotal,Porcentaje\n';
       acumuladoPagos.forEach((p) => {
@@ -290,6 +378,18 @@ export const HistorialVentasView: React.FC<HistorialVentasViewProps> = () => {
             >
               <CreditCard className="w-3.5 h-3.5" />
               <span>Formas de Pago</span>
+            </button>
+
+            <button
+              onClick={() => setActiveSubTab('margen_ganancia')}
+              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                activeSubTab === 'margen_ganancia'
+                  ? 'bg-emerald-500 text-stone-950 shadow-sm font-black'
+                  : 'text-stone-400 hover:text-white'
+              }`}
+            >
+              <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Margen de Ganancias</span>
             </button>
           </div>
 

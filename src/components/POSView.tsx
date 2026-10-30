@@ -238,7 +238,11 @@ export const POSView: React.FC<POSViewProps> = ({
       // Otherwise create a brand new comanda with a strictly unique ticket number
       const nextTicket = sqliteService.getNextTicketNumber();
       const now = new Date();
-      const dateStr = now.toISOString().replace('T', ' ').substring(0, 19);
+      const localYear = now.getFullYear();
+      const localMonth = String(now.getMonth() + 1).padStart(2, '0');
+      const localDay = String(now.getDate()).padStart(2, '0');
+      const dateStr = `${localYear}-${localMonth}-${localDay}`;
+      const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
 
       const notesParts: string[] = [];
       if (comandaNotas.trim()) notesParts.push(comandaNotas.trim());
@@ -257,7 +261,7 @@ export const POSView: React.FC<POSViewProps> = ({
           Estado: 'Cocina',
           Monto: safeParsePrice(totalAmount),
           Notas: fullNotas,
-          HoraCreacion: now.toTimeString().substring(0, 5),
+          HoraCreacion: timeStr,
         },
         cart
       );
@@ -287,7 +291,11 @@ export const POSView: React.FC<POSViewProps> = ({
     try {
       const nextTicket = sqliteService.getNextTicketNumber();
       const now = new Date();
-      const dateStr = now.toISOString().replace('T', ' ').substring(0, 19);
+      const localYear = now.getFullYear();
+      const localMonth = String(now.getMonth() + 1).padStart(2, '0');
+      const localDay = String(now.getDate()).padStart(2, '0');
+      const dateStr = `${localYear}-${localMonth}-${localDay}`;
+      const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
       const finalUbicacion = getFinalUbicacion();
 
       const notesParts: string[] = [];
@@ -312,7 +320,7 @@ export const POSView: React.FC<POSViewProps> = ({
           Monto: safeParsePrice(totalAmount),
           FormaPago: formaPago,
           Notas: fullNotas,
-          HoraCreacion: now.toTimeString().substring(0, 5),
+          HoraCreacion: timeStr,
         },
         cart
       );

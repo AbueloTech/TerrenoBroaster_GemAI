@@ -25,4 +25,32 @@
     color: #000000 !important;
     background: #ffffff !important;
   }
+
+  #printable-report, #printable-report * {
+    visibility: visible;
+  }
+  #printable-report {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100% !important;
+    padding: 10mm !important;
+    margin: 0 !important;
+    color: #000000 !important;
+    background: #ffffff !important;
+  }
+  #printable-report table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+  #printable-report th, #printable-report td {
+    border: 1px solid #d1d5db !important;
+    padding: 6px 10px !important;
+    color: #000000 !important;
+    font-size: 11px !important;
+  }
+  #printable-report th {
+    background-color: #f3f4f6 !important;
+    font-weight: bold !important;
+  }
 }

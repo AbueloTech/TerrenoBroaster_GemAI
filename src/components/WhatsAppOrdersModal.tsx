@@ -209,6 +209,28 @@ export const WhatsAppOrdersModal: React.FC<WhatsAppOrdersModalProps> = ({
   const cobradoCount = pedidos.filter((p) => p.Estado === 'Cobrado').length;
   const anuladoCount = pedidos.filter((p) => p.Estado === 'Anulado' || p.Estado === 'Cancelado').length;
 
+  const getWhatsAppReplyMode = (
+    p: PedidoWhatsApp
+  ): 'recibido' | 'en_cocina' | 'en_camino' | 'listo_retiro' | 'cobrado' => {
+    if (p.Estado === 'Pendiente') return 'recibido';
+    if (p.Estado === 'En Cocina') return 'en_cocina';
+    if (p.Estado === 'Entregado') return p.TipoEntrega === 'Delivery' ? 'en_camino' : 'listo_retiro';
+    if (p.Estado === 'Cobrado') return 'cobrado';
+    return 'en_cocina';
+  };
+
+  const getWhatsAppReplyTooltip = (p: PedidoWhatsApp) => {
+    if (p.Estado === 'Pendiente') return 'Notificar por WhatsApp: Pedido recibido con éxito';
+    if (p.Estado === 'En Cocina') return 'Notificar por WhatsApp: Su pedido está siendo procesado en la Cocina';
+    if (p.Estado === 'Entregado') {
+      return p.TipoEntrega === 'Delivery'
+        ? 'Notificar por WhatsApp: Tu pedido va en camino, por favor estar pendiente'
+        : 'Notificar por WhatsApp: Listo para retirar en el restaurante';
+    }
+    if (p.Estado === 'Cobrado') return 'Notificar por WhatsApp: Pedido cobrado con éxito';
+    return 'Notificar por WhatsApp';
+  };
+
   const handleSavePhone = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const clean = phoneInput.trim();
@@ -926,12 +948,12 @@ export const WhatsAppOrdersModal: React.FC<WhatsAppOrdersModalProps> = ({
                                 href={buildWhatsAppReplyUrl(
                                   pedido.TelefonoCliente,
                                   pedido,
-                                  isPending ? 'recibido' : isKitchen ? 'en_camino' : 'listo_retiro'
+                                  getWhatsAppReplyMode(pedido)
                                 )}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="p-1.5 rounded-lg bg-emerald-950/60 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-500/30 transition-colors"
-                                title="Abrir chat en WhatsApp Web"
+                                title={getWhatsAppReplyTooltip(pedido)}
                               >
                                 <Send className="w-3.5 h-3.5" />
                               </a>
@@ -1060,14 +1082,15 @@ export const WhatsAppOrdersModal: React.FC<WhatsAppOrdersModalProps> = ({
                   href={buildWhatsAppReplyUrl(
                     activeDetailsPedido.TelefonoCliente,
                     activeDetailsPedido,
-                    activeDetailsPedido.Estado === 'Pendiente' ? 'recibido' : 'en_camino'
+                    getWhatsAppReplyMode(activeDetailsPedido)
                   )}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="mt-1 inline-flex items-center space-x-1 text-[11px] text-emerald-400 hover:underline"
+                  title={getWhatsAppReplyTooltip(activeDetailsPedido)}
                 >
                   <ExternalLink className="w-3 h-3" />
-                  <span>Abrir Chat WhatsApp</span>
+                  <span>Notificar por WhatsApp ({activeDetailsPedido.Estado})</span>
                 </a>
               </div>
 
@@ -1269,6 +1292,22 @@ export const WhatsAppOrdersModal: React.FC<WhatsAppOrdersModalProps> = ({
                     <span>Marcar Cobrado</span>
                   </button>
                 )}
+
+                {/* Notify via WhatsApp Web */}
+                <a
+                  href={buildWhatsAppReplyUrl(
+                    activeDetailsPedido.TelefonoCliente,
+                    activeDetailsPedido,
+                    getWhatsAppReplyMode(activeDetailsPedido)
+                  )}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3.5 py-1.5 rounded-xl bg-emerald-950/80 hover:bg-emerald-900/90 text-emerald-300 border border-emerald-500/50 font-bold flex items-center space-x-1.5 shadow-sm transition-all"
+                  title={getWhatsAppReplyTooltip(activeDetailsPedido)}
+                >
+                  <Send className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Notificar WhatsApp</span>
+                </a>
 
                 {/* Close Button */}
                 <button
