@@ -411,28 +411,45 @@ async function createServer() {
   const distPath = path.resolve(process.cwd(), 'dist');
   const hasDist = fs.existsSync(distPath) && fs.existsSync(path.join(distPath, 'index.html'));
 
-  if (fs.existsSync(path.join(distPath, 'assets'))) {
-    app.use('/assets', express.static(path.join(distPath, 'assets'), {
-      maxAge: '1d',
-      immutable: true,
-    }));
-  }
-
-  if (hasDist) {
-    console.log('[Server] Sirviendo build compilado optimizado desde dist/');
+  if (isProduction && hasDist) {
+    console.log('[Server] Modo Producción: Sirviendo build compilado optimizado desde dist/');
+    if (fs.existsSync(path.join(distPath, 'assets'))) {
+      app.use('/assets', express.static(path.join(distPath, 'assets'), {
+        maxAge: '1d',
+        immutable: true,
+      }));
+    }
     app.use(express.static(distPath, { index: false }));
-    app.get('*', (req, res) => {
-      res.setHeader('Cache-Control', 'no-cache');
-      res.sendFile(path.join(distPath, 'index.html'));
+    app.get('*', (req, res, next) => {
+      const indexPath = path.join(distPath, 'index.html');
+      if (fs.existsSync(indexPath)) {
+        res.setHeader('Cache-Control', 'no-cache');
+        res.sendFile(indexPath, (err) => {
+          if (err) {
+            console.error('[Server] Error al enviar index.html:', err);
+            next(err);
+          }
+        });
+      } else {
+        next();
+      }
     });
   } else {
-    console.log('[Server] Iniciando middleware de desarrollo Vite...');
+    console.log('[Server] Modo Desarrollo: Montando middleware en vivo Vite...');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
   }
+
+  // Global fallback error handler to prevent crashing or blank screen with raw ENOENT
+  app.use((err: any, req: any, res: any, next: any) => {
+    console.error('[Server Express Error]:', err);
+    if (!res.headersSent) {
+      res.status(500).send('Error interno del servidor. Por favor recarga la página.');
+    }
+  });
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server listening on http://0.0.0.0:${PORT}`);

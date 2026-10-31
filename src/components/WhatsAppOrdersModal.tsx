@@ -38,10 +38,12 @@ import {
   Flame,
   UtensilsCrossed,
   Volume2,
+  Bluetooth,
 } from 'lucide-react';
 import { PedidoWhatsApp, EstadoPedidoWhatsApp, Plato, CartItem, FormaPago, PedidoWhatsAppItem } from '../types';
 import { sqliteService } from '../db/sqliteService';
 import { playNotificationSound } from '../utils/soundAlert';
+import { kitchenPrinterService } from '../services/kitchenPrinterService';
 import {
   parseWhatsAppMessage,
   buildWhatsAppReplyUrl,
@@ -262,14 +264,43 @@ export const WhatsAppOrdersModal: React.FC<WhatsAppOrdersModalProps> = ({
     });
   };
 
-  // Convert to Kitchen Comanda
-  const handleConvertToComanda = (pedido: PedidoWhatsApp) => {
+  // Print Kitchen Ticket Helper
+  const handlePrintKitchenTicket = async (pedido: PedidoWhatsApp, nTicket?: string) => {
+    const ticketNum = nTicket || pedido.NTicket || `WA-${pedido.Id}`;
+    const result = await kitchenPrinterService.printComanda({
+      nTicket: ticketNum,
+      fecha: pedido.FechaCreacion || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      cliente: pedido.NombreCliente,
+      tipoServicio: pedido.TipoEntrega,
+      ubicacion: `${pedido.TipoEntrega} (WhatsApp)`,
+      items: pedido.Items.map((i) => ({
+        nombre: i.platoNombre,
+        cantidad: i.cantidad,
+        notas: i.notas,
+      })),
+      notas: pedido.Notas,
+      telefono: pedido.TelefonoCliente,
+      direccion: pedido.DireccionEntrega,
+    });
+
+    if (result.printedViaBluetooth) {
+      showToast(`¡Comanda #${ticketNum} impresa por Bluetooth en Cocina!`);
+    } else {
+      showToast(`Comanda #${ticketNum} lista para imprimir en Cocina.`);
+    }
+  };
+
+  // Convert to Kitchen Comanda & Print Kitchen Ticket
+  const handleConvertToComanda = async (pedido: PedidoWhatsApp) => {
     const res = sqliteService.convertWhatsAppPedidoToComanda(pedido.Id);
     if (res) {
       if (soundEnabled) {
         playNotificationSound();
       }
-      showToast(`¡Comanda #${res.nTicket} creada y enviada al monitor de Cocina!`);
+      showToast(`¡Comanda #${res.nTicket} enviada a Cocina e imprimiendo ticket!`);
+
+      // Automatically print ticket to Bluetooth / Thermal Kitchen printer!
+      await handlePrintKitchenTicket(pedido, res.nTicket);
     }
   };
 
@@ -296,10 +327,17 @@ export const WhatsAppOrdersModal: React.FC<WhatsAppOrdersModalProps> = ({
     showToast(`Items de ${pedido.NombreCliente} cargados en el Punto de Venta.`);
   };
 
-  // Status Change
-  const handleChangeStatus = (id: number, nuevoEstado: EstadoPedidoWhatsApp) => {
+  // Status Change (if changed to En Cocina, triggers automatic print)
+  const handleChangeStatus = async (id: number, nuevoEstado: EstadoPedidoWhatsApp) => {
     sqliteService.updatePedidoWhatsAppEstado(id, nuevoEstado);
     showToast(`Estado actualizado a: ${nuevoEstado}`);
+
+    if (nuevoEstado === 'En Cocina') {
+      const target = pedidos.find((p) => p.Id === id);
+      if (target) {
+        await handlePrintKitchenTicket(target);
+      }
+    }
   };
 
   // Delete

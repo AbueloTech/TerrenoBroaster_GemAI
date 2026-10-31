@@ -31,6 +31,7 @@ import {
   AlertCircle,
   HelpCircle,
   Sparkles,
+  Printer,
 } from 'lucide-react';
 import {
   Insumo,
@@ -45,6 +46,7 @@ import {
 } from '../types';
 import { sqliteService } from '../db/sqliteService';
 import { formatCurrency, safeParsePrice } from '../utils/currency';
+import { PrintReportModal, PrintReportModalProps } from './PrintReportModal';
 
 interface InventarioViewProps {
   onRefreshPlatos?: () => void;
@@ -508,6 +510,323 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
     });
   }, [movimientos, kardexFilter]);
 
+  // Printable Reports State
+  const [printReportData, setPrintReportData] = useState<Omit<PrintReportModalProps, 'isOpen' | 'onClose'> | null>(null);
+
+  // 1. Print Insumos / Stock Valorizado
+  const handlePrintInsumos = () => {
+    setPrintReportData({
+      title: 'Reporte de Inventario Físico & Stock Valorizado',
+      subtitle: `Fecha de emisión: ${new Date().toLocaleDateString('es-VE')} | Total: ${insumos.length} insumos registrados`,
+      categoryBadge: 'Inventario & Materia Prima',
+      summaryCards: [
+        { label: 'Insumos Registrados', value: insumos.length.toString(), subtext: 'En catálogo de materias primas' },
+        { label: 'Valor Total en Stock', value: `$${valorTotalInventario.toFixed(2)}`, subtext: 'Capital inmovilizado en insumos', isHighlight: true },
+        { label: 'Stock Bajo Mínimo', value: insumosCriticos.length.toString(), subtext: 'Insumos en riesgo de quiebre', isHighlight: insumosCriticos.length > 0 },
+        { label: 'Categorías Activas', value: new Set(insumos.map((i) => i.Categoria)).size.toString(), subtext: 'Grupos de insumos' },
+      ],
+      columns: [
+        { header: '#', align: 'center' },
+        { header: 'Insumo / Materia Prima', align: 'left' },
+        { header: 'Categoría', align: 'left' },
+        { header: 'Stock Actual', align: 'center' },
+        { header: 'Mínimo', align: 'center' },
+        { header: 'Unidad', align: 'center' },
+        { header: 'Costo Unit. ($)', align: 'right' },
+        { header: 'Valor Total ($)', align: 'right' },
+        { header: 'Proveedor', align: 'left' },
+        { header: 'Estado', align: 'center' },
+      ],
+      rows: insumos.map((i, idx) => [
+        idx + 1,
+        i.Nombre,
+        i.Categoria,
+        i.StockActual,
+        i.StockMinimo,
+        i.UnidadMedida,
+        `$${i.CostoUnitario.toFixed(2)}`,
+        `$${(i.StockActual * i.CostoUnitario).toFixed(2)}`,
+        i.ProveedorNombre || '—',
+        i.StockActual <= i.StockMinimo ? 'BAJO MÍNIMO' : 'NORMAL',
+      ]),
+      footerRow: [
+        '--',
+        `TOTAL INVENTARIO VALORIZADO (${insumos.length} insumos)`,
+        '--',
+        '--',
+        '--',
+        '--',
+        '--',
+        `$${valorTotalInventario.toFixed(2)}`,
+        '--',
+        '--',
+      ],
+      notes: '* Los valores de inventario están calculados a costo unitario de reposición registrado en la base de datos local SQLite.',
+      downloadFilename: `Inventario_Stock_Valorizado_${new Date().toISOString().split('T')[0]}.csv`,
+    });
+  };
+
+  // 2. Print General Escandallos (All Dishes)
+  const handlePrintEscandallosGeneral = () => {
+    let costoTotalSum = 0;
+    let ventaTotalSum = 0;
+    platos.forEach((p) => {
+      const esc = escandallos.find((e) => e.PlatoId === p.ID);
+      const costo = esc && esc.TieneReceta && esc.CostoTotalInsumos > 0 ? esc.CostoTotalInsumos : p.Precio * 0.35;
+      costoTotalSum += costo;
+      ventaTotalSum += p.Precio;
+    });
+
+    setPrintReportData({
+      title: 'Reporte General de Escandallos y Food Cost',
+      subtitle: `Catálogo de Platos del Menú | ${platos.length} platos (${platosConReceta} con escandallo detallado)`,
+      categoryBadge: 'Costeo & Rentabilidad Gastronómica',
+      summaryCards: [
+        { label: 'Platos en Menú', value: platos.length.toString(), subtext: 'Total de ítems activos' },
+        { label: 'Con Receta / Escandallo', value: `${platosConReceta} / ${platos.length}`, subtext: `${platos.length > 0 ? ((platosConReceta / platos.length) * 100).toFixed(0) : 0}% con costeo real`, isHighlight: true },
+        { label: 'Margen Promedio Global', value: `${ventaTotalSum > 0 ? (((ventaTotalSum - costoTotalSum) / ventaTotalSum) * 100).toFixed(1) : 0}%`, subtext: 'Sobre catálogo del menú', isHighlight: true },
+      ],
+      columns: [
+        { header: '#', align: 'center' },
+        { header: 'Plato / Producto', align: 'left' },
+        { header: 'Categoría', align: 'left' },
+        { header: 'Precio Menú ($)', align: 'right' },
+        { header: 'Costo Insumos ($)', align: 'right' },
+        { header: 'Margen Bruto ($)', align: 'right' },
+        { header: '% Margen', align: 'right' },
+        { header: '% Food Cost', align: 'right' },
+        { header: 'Escandallo', align: 'center' },
+      ],
+      rows: platos.map((p, idx) => {
+        const esc = escandallos.find((e) => e.PlatoId === p.ID);
+        const hasRec = Boolean(esc && esc.TieneReceta && esc.CostoTotalInsumos > 0);
+        const costo = hasRec && esc ? esc.CostoTotalInsumos : p.Precio * 0.35;
+        const margen = p.Precio - costo;
+        const margenPct = p.Precio > 0 ? (margen / p.Precio) * 100 : 0;
+        const foodCostPct = p.Precio > 0 ? (costo / p.Precio) * 100 : 0;
+
+        return [
+          idx + 1,
+          p.Plato,
+          p.Categoria,
+          `$${p.Precio.toFixed(2)}`,
+          `$${costo.toFixed(2)}`,
+          `$${margen.toFixed(2)}`,
+          `${margenPct.toFixed(1)}%`,
+          `${foodCostPct.toFixed(1)}%`,
+          hasRec ? 'DETALLADO' : 'EST. 35%',
+        ];
+      }),
+      footerRow: [
+        '--',
+        `PROMEDIOS GENERALES (${platos.length} platos)`,
+        '--',
+        `$${(ventaTotalSum / (platos.length || 1)).toFixed(2)}`,
+        `$${(costoTotalSum / (platos.length || 1)).toFixed(2)}`,
+        `$${((ventaTotalSum - costoTotalSum) / (platos.length || 1)).toFixed(2)}`,
+        `${ventaTotalSum > 0 ? (((ventaTotalSum - costoTotalSum) / ventaTotalSum) * 100).toFixed(1) : 0}%`,
+        `${ventaTotalSum > 0 ? ((costoTotalSum / ventaTotalSum) * 100).toFixed(1) : 0}%`,
+        '--',
+      ],
+      notes: '* Los platos marcados como "EST. 35%" no tienen ingredientes asignados y calculan su food cost con la norma estándar del 35%. Registre los insumos en el diseñador de escandallos para costeo exacto.',
+      downloadFilename: `Escandallos_Menu_General_${new Date().toISOString().split('T')[0]}.csv`,
+    });
+  };
+
+  // 3. Print Ficha Técnica Individual (Selected Dish)
+  const handlePrintFichaTecnica = () => {
+    if (!selectedPlato) return;
+    setPrintReportData({
+      title: `Ficha Técnica & Escandallo: ${selectedPlato.Plato}`,
+      subtitle: `Categoría: ${selectedPlato.Categoria} | Precio Actual POS: $${pricingAnalysis.precioActual.toFixed(2)}`,
+      categoryBadge: 'Ficha Técnica de Cocina & Escandallo',
+      summaryCards: [
+        { label: 'Precio Menú POS', value: `$${pricingAnalysis.precioActual.toFixed(2)}`, subtext: 'Precio al consumidor' },
+        { label: 'Costo Materia Prima', value: `$${pricingAnalysis.costo.toFixed(2)}`, subtext: `${pricingAnalysis.foodCostPorcentaje.toFixed(1)}% Food Cost`, isHighlight: false },
+        { label: 'Margen Bruto Unit.', value: `$${pricingAnalysis.margenBruto.toFixed(2)}`, subtext: 'Contribución marginal por plato', isHighlight: true },
+        { label: 'Margen Rentabilidad %', value: `${pricingAnalysis.margenPorcentaje.toFixed(1)}%`, subtext: 'Margen sobre venta', isHighlight: true },
+      ],
+      columns: [
+        { header: '#', align: 'center' },
+        { header: 'Ingrediente / Materia Prima', align: 'left' },
+        { header: 'Categoría', align: 'left' },
+        { header: 'Cantidad', align: 'center' },
+        { header: 'Unidad', align: 'center' },
+        { header: 'Costo Unit. ($)', align: 'right' },
+        { header: 'Importe Receta ($)', align: 'right' },
+        { header: '% en Plato', align: 'right' },
+        { header: 'Notas de Preparación', align: 'left' },
+      ],
+      rows: recetaItems.map((item, idx) => {
+        const ins = insumos.find((i) => i.InsumoId === item.InsumoId);
+        const costoUnit = ins ? ins.CostoUnitario : (item.CostoUnitarioInsumo || 0);
+        const subtotal = item.Cantidad * costoUnit;
+        const pct = currentCalculatedFoodCost > 0 ? (subtotal / currentCalculatedFoodCost) * 100 : 0;
+        return [
+          idx + 1,
+          item.InsumoNombre || ins?.Nombre || `Insumo #${item.InsumoId}`,
+          ins?.Categoria || '—',
+          item.Cantidad,
+          item.UnidadMedida,
+          `$${costoUnit.toFixed(2)}`,
+          `$${subtotal.toFixed(2)}`,
+          `${pct.toFixed(1)}%`,
+          item.Notas || '—',
+        ];
+      }),
+      footerRow: [
+        '--',
+        `TOTAL COSTO DE MATERIA PRIMA (FOOD COST)`,
+        '--',
+        '--',
+        '--',
+        '--',
+        `$${currentCalculatedFoodCost.toFixed(2)}`,
+        '100%',
+        '--',
+      ],
+      notes: `* Precios de Venta Sugeridos según estándar gastronómico: Con 50% de margen = $${pricingAnalysis.precioSugerido50.toFixed(2)} | Con 60% de margen = $${pricingAnalysis.precioSugerido60.toFixed(2)} | Con 70% de margen = $${pricingAnalysis.precioSugerido70.toFixed(2)}.`,
+      downloadFilename: `Ficha_Tecnica_${selectedPlato.Plato.replace(/\s+/g, '_')}.csv`,
+    });
+  };
+
+  // 4. Print Proveedores Directory
+  const handlePrintProveedores = () => {
+    setPrintReportData({
+      title: 'Directorio Oficial de Proveedores de Insumos',
+      subtitle: `Terreno Broaster | Total de Proveedores: ${proveedores.length}`,
+      categoryBadge: 'Compras & Cadena de Suministro',
+      summaryCards: [
+        { label: 'Proveedores Registrados', value: proveedores.length.toString(), subtext: 'Aliados comerciales activos' },
+        { label: 'Insumos Vinculados', value: insumos.filter((i) => i.ProveedorId).length.toString(), subtext: 'Materias primas asignadas', isHighlight: true },
+      ],
+      columns: [
+        { header: '#', align: 'center' },
+        { header: 'Empresa / Proveedor', align: 'left' },
+        { header: 'RIF / Identificación', align: 'left' },
+        { header: 'Contacto', align: 'left' },
+        { header: 'Teléfono / WhatsApp', align: 'left' },
+        { header: 'Email', align: 'left' },
+        { header: 'Días de Despacho', align: 'left' },
+        { header: 'Insumos Suministrados', align: 'center' },
+      ],
+      rows: proveedores.map((prov, idx) => {
+        const count = insumos.filter((i) => i.ProveedorId === prov.ProveedorId).length;
+        return [
+          idx + 1,
+          prov.Nombre,
+          prov.Rif || '—',
+          prov.Contacto || '—',
+          prov.Telefono || '—',
+          prov.Email || '—',
+          prov.DiasEntrega || '—',
+          `${count} insumos`,
+        ];
+      }),
+      notes: '* Directorio para emisión de solicitudes de compra y reposición directa vía WhatsApp.',
+      downloadFilename: `Directorio_Proveedores_${new Date().toISOString().split('T')[0]}.csv`,
+    });
+  };
+
+  // 5. Print Kardex Movements
+  const handlePrintKardex = () => {
+    setPrintReportData({
+      title: 'Reporte de Movimientos de Kardex (Trazabilidad)',
+      subtitle: `Filtro aplicado: ${kardexFilter} | Total de movimientos emitidos: ${filteredMovimientos.length}`,
+      categoryBadge: 'Kardex & Auditoría de Stock',
+      summaryCards: [
+        { label: 'Movimientos Listados', value: filteredMovimientos.length.toString(), subtext: 'Transacciones registradas' },
+        { label: 'Entradas por Compra', value: movimientos.filter((m) => m.Tipo === 'Entrada_Compra').length.toString(), subtext: 'Ingresos al almacén' },
+        { label: 'Salidas por Ventas', value: movimientos.filter((m) => m.Tipo === 'Salida_Venta').length.toString(), subtext: 'Descontadas por comandas POS' },
+        { label: 'Ajustes y Mermas', value: movimientos.filter((m) => m.Tipo === 'Ajuste_Manual' || m.Tipo === 'Merma_Desperdicio').length.toString(), subtext: 'Ajustes de inventario', isHighlight: true },
+      ],
+      columns: [
+        { header: '#', align: 'center' },
+        { header: 'Fecha / Hora', align: 'left' },
+        { header: 'Insumo', align: 'left' },
+        { header: 'Tipo Movimiento', align: 'left' },
+        { header: 'Cantidad', align: 'center' },
+        { header: 'Stock Ant. → Nuevo', align: 'center' },
+        { header: 'Referencia / Ticket', align: 'left' },
+        { header: 'Notas / Auditoría', align: 'left' },
+      ],
+      rows: filteredMovimientos.map((m, idx) => [
+        idx + 1,
+        m.Fecha,
+        m.InsumoNombre || `Insumo #${m.InsumoId}`,
+        m.Tipo.replace('_', ' '),
+        m.Tipo === 'Entrada_Compra' ? `+${m.Cantidad}` : `-${Math.abs(m.Cantidad)}`,
+        `${m.StockAnterior} → ${m.StockNuevo}`,
+        m.Referencia || '—',
+        m.Notas || '—',
+      ]),
+      notes: '* Registro inmutable de trazabilidad generado por el motor SQLite local.',
+      downloadFilename: `Kardex_Movimientos_${kardexFilter}_${new Date().toISOString().split('T')[0]}.csv`,
+    });
+  };
+
+  // 6. Print Alertas de Stock Crítico
+  const handlePrintAlertas = () => {
+    let totalEstCompra = 0;
+    insumosCriticos.forEach((i) => {
+      const sugerido = Math.max(i.StockMinimo * 2 - i.StockActual, 1);
+      totalEstCompra += sugerido * i.CostoUnitario;
+    });
+
+    setPrintReportData({
+      title: 'Orden de Compra & Reposición de Stock Crítico',
+      subtitle: `Insumos que requieren reabastecimiento urgente | Fecha: ${new Date().toLocaleDateString('es-VE')}`,
+      categoryBadge: 'Compras Urgentes & Reposición',
+      summaryCards: [
+        { label: 'Insumos Críticos', value: insumosCriticos.length.toString(), subtext: 'Por debajo o igual al stock mínimo', isHighlight: true },
+        { label: 'Insumos Agotados (Stock 0)', value: insumosCriticos.filter((i) => i.StockActual <= 0).length.toString(), subtext: 'Quiebre total de stock', isHighlight: true },
+        { label: 'Monto Estimado Reposición', value: `$${totalEstCompra.toFixed(2)}`, subtext: 'Para llevar a 2x stock de seguridad', isHighlight: true },
+      ],
+      columns: [
+        { header: '#', align: 'center' },
+        { header: 'Insumo', align: 'left' },
+        { header: 'Categoría', align: 'left' },
+        { header: 'Stock Actual', align: 'center' },
+        { header: 'Stock Mínimo', align: 'center' },
+        { header: 'Unidad', align: 'center' },
+        { header: 'Cant. Sugerida', align: 'center' },
+        { header: 'Costo Unit. ($)', align: 'right' },
+        { header: 'Subtotal Est. ($)', align: 'right' },
+        { header: 'Proveedor', align: 'left' },
+      ],
+      rows: insumosCriticos.map((i, idx) => {
+        const sugerido = Math.max(i.StockMinimo * 2 - i.StockActual, 1);
+        const sub = sugerido * i.CostoUnitario;
+        return [
+          idx + 1,
+          i.Nombre,
+          i.Categoria,
+          i.StockActual,
+          i.StockMinimo,
+          i.UnidadMedida,
+          sugerido,
+          `$${i.CostoUnitario.toFixed(2)}`,
+          `$${sub.toFixed(2)}`,
+          i.ProveedorNombre || '—',
+        ];
+      }),
+      footerRow: [
+        '--',
+        `TOTAL ESTIMADO DE COMPRA (${insumosCriticos.length} insumos)`,
+        '--',
+        '--',
+        '--',
+        '--',
+        '--',
+        '--',
+        `$${totalEstCompra.toFixed(2)}`,
+        '--',
+      ],
+      notes: '* Cantidad sugerida calculada para reponer el doble del stock de seguridad mínimo y evitar quiebres durante operaciones de alta demanda.',
+      downloadFilename: `Orden_Compra_Stock_Critico_${new Date().toISOString().split('T')[0]}.csv`,
+    });
+  };
+
   return (
     <div className="flex-1 bg-stone-950 text-white min-h-screen flex flex-col">
       {/* Toast Notification */}
@@ -762,6 +1081,14 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
               {/* Action Buttons */}
               <div className="flex items-center space-x-2">
                 <button
+                  onClick={handlePrintInsumos}
+                  className="flex items-center space-x-2 px-3.5 py-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700 text-xs sm:text-sm font-bold transition-all shadow-sm active:scale-95 cursor-pointer"
+                >
+                  <Printer className="w-4 h-4 text-emerald-400" />
+                  <span>Imprimir Stock</span>
+                </button>
+
+                <button
                   onClick={() => {
                     setEditingInsumo(null);
                     setIsInsumoModalOpen(true);
@@ -957,16 +1284,21 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             {/* Left 4 Cols: Platos List */}
             <div className="lg:col-span-4 bg-stone-900 border border-stone-800 rounded-2xl p-4 flex flex-col h-[700px]">
-              <div className="mb-3">
-                <h3 className="font-black text-white text-base flex items-center justify-between">
-                  <span>Seleccionar Plato</span>
-                  <span className="text-xs text-stone-400 font-mono font-normal">
-                    {platos.length} platos
-                  </span>
-                </h3>
-                <p className="text-xs text-stone-400">
-                  Elige un plato para configurar sus ingredientes y ver su estructura de costos.
-                </p>
+              <div className="mb-3 flex items-center justify-between">
+                <div>
+                  <h3 className="font-black text-white text-base">Seleccionar Plato</h3>
+                  <p className="text-xs text-stone-400">
+                    {platos.length} platos ({platosConReceta} con escandallo)
+                  </p>
+                </div>
+                <button
+                  onClick={handlePrintEscandallosGeneral}
+                  title="Imprimir reporte general de escandallos y márgenes del menú"
+                  className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700 text-xs font-bold transition-all shadow-sm cursor-pointer"
+                >
+                  <Printer className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Imprimir Todos</span>
+                </button>
               </div>
 
               {/* Platos Scrollable List */}
@@ -1027,6 +1359,14 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
                       </div>
 
                       <div className="flex items-center space-x-3">
+                        <button
+                          onClick={handlePrintFichaTecnica}
+                          className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-md active:scale-95 cursor-pointer"
+                        >
+                          <Printer className="w-3.5 h-3.5" />
+                          <span>Imprimir Ficha Técnica</span>
+                        </button>
+
                         <div className="text-right">
                           <span className="text-[11px] text-stone-400 block">Precio Actual Menú POS</span>
                           <span className="text-2xl font-black text-white font-mono">
@@ -1304,16 +1644,26 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
                 </p>
               </div>
 
-              <button
-                onClick={() => {
-                  setEditingProveedor(null);
-                  setIsProveedorModalOpen(true);
-                }}
-                className="flex items-center space-x-2 px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 text-xs sm:text-sm font-black transition-all shadow cursor-pointer"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Nuevo Proveedor</span>
-              </button>
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={handlePrintProveedores}
+                  className="flex items-center space-x-2 px-3.5 py-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700 text-xs sm:text-sm font-bold transition-all shadow-sm active:scale-95 cursor-pointer"
+                >
+                  <Printer className="w-4 h-4 text-emerald-400" />
+                  <span>Imprimir Directorio</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setEditingProveedor(null);
+                    setIsProveedorModalOpen(true);
+                  }}
+                  className="flex items-center space-x-2 px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 text-xs sm:text-sm font-black transition-all shadow cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Nuevo Proveedor</span>
+                </button>
+              </div>
             </div>
 
             {/* Proveedores Cards Grid */}
@@ -1437,8 +1787,16 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
                 </p>
               </div>
 
-              {/* Filter */}
+              {/* Filter & Print */}
               <div className="flex items-center space-x-2">
+                <button
+                  onClick={handlePrintKardex}
+                  className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700 text-xs font-bold transition-all shadow-sm active:scale-95 cursor-pointer"
+                >
+                  <Printer className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Imprimir Kardex</span>
+                </button>
+
                 <span className="text-xs text-stone-400">Tipo:</span>
                 <select
                   value={kardexFilter}
@@ -1551,15 +1909,25 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
                 </p>
               </div>
 
-              {insumosCriticos.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2">
                 <button
-                  onClick={handleGenerateWhatsAppOrder}
-                  className="flex items-center space-x-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs sm:text-sm transition-all shadow-md active:scale-95 cursor-pointer"
+                  onClick={handlePrintAlertas}
+                  className="flex items-center space-x-2 px-3.5 py-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700 font-bold text-xs sm:text-sm transition-all shadow-sm active:scale-95 cursor-pointer"
                 >
-                  <Copy className="w-4 h-4" />
-                  <span>Copiar Orden para WhatsApp</span>
+                  <Printer className="w-4 h-4 text-emerald-400" />
+                  <span>Imprimir Reabastecimiento</span>
                 </button>
-              )}
+
+                {insumosCriticos.length > 0 && (
+                  <button
+                    onClick={handleGenerateWhatsAppOrder}
+                    className="flex items-center space-x-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs sm:text-sm transition-all shadow-md active:scale-95 cursor-pointer"
+                  >
+                    <Copy className="w-4 h-4" />
+                    <span>Copiar Orden para WhatsApp</span>
+                  </button>
+                )}
+              </div>
             </div>
 
             {insumosCriticos.length === 0 ? (
@@ -2115,6 +2483,23 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
             </form>
           </div>
         </div>
+      )}
+
+      {/* GLOBAL REUSABLE PRINT REPORT MODAL FOR ALL INVENTORY SECTIONS */}
+      {printReportData && (
+        <PrintReportModal
+          isOpen={true}
+          onClose={() => setPrintReportData(null)}
+          title={printReportData.title}
+          subtitle={printReportData.subtitle}
+          categoryBadge={printReportData.categoryBadge}
+          summaryCards={printReportData.summaryCards}
+          columns={printReportData.columns}
+          rows={printReportData.rows}
+          footerRow={printReportData.footerRow}
+          notes={printReportData.notes}
+          downloadFilename={printReportData.downloadFilename}
+        />
       )}
     </div>
   );

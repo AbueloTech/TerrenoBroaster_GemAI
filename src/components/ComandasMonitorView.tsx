@@ -29,7 +29,10 @@ import {
   Flame,
   LayoutGrid,
   Columns3,
+  Printer,
+  Bluetooth,
 } from 'lucide-react';
+import { kitchenPrinterService } from '../services/kitchenPrinterService';
 
 interface ComandasMonitorViewProps {
   onSaleComplete?: (venta: Venta, detalles: DetalleVenta[]) => void;
@@ -513,16 +516,27 @@ export const ComandasMonitorView: React.FC<ComandasMonitorViewProps> = ({
             </button>
           </div>
 
-          {/* Search box */}
-          <div className="relative w-full sm:w-64">
-            <Search className="w-3.5 h-3.5 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Buscar por ticket, cliente o mesa..."
-              className="w-full pl-8 pr-3 py-1.5 bg-stone-900 border border-stone-800 rounded-lg text-xs text-stone-200 placeholder-stone-500 focus:outline-none focus:border-amber-500"
-            />
+          {/* Search box & Bluetooth Printer Trigger */}
+          <div className="flex items-center space-x-2 w-full sm:w-auto">
+            <button
+              onClick={() => kitchenPrinterService.connectBluetoothPrinter()}
+              title="Vincular o configurar impresora Bluetooth en Cocina"
+              className="flex items-center space-x-1.5 px-3 py-1.5 bg-stone-900 hover:bg-stone-800 text-stone-200 border border-stone-800 rounded-lg text-xs font-semibold transition-all shrink-0 cursor-pointer"
+            >
+              <Bluetooth className={`w-3.5 h-3.5 ${kitchenPrinterService.isBluetoothConnected() ? 'text-emerald-400 animate-pulse' : 'text-blue-400'}`} />
+              <span>{kitchenPrinterService.isBluetoothConnected() ? `BT: ${kitchenPrinterService.getConnectedPrinterName()}` : 'Conectar BT Cocina'}</span>
+            </button>
+
+            <div className="relative flex-1 sm:w-64">
+              <Search className="w-3.5 h-3.5 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Buscar por ticket, cliente o mesa..."
+                className="w-full pl-8 pr-3 py-1.5 bg-stone-900 border border-stone-800 rounded-lg text-xs text-stone-200 placeholder-stone-500 focus:outline-none focus:border-amber-500"
+              />
+            </div>
           </div>
 
         </div>
@@ -672,6 +686,27 @@ export const ComandasMonitorView: React.FC<ComandasMonitorViewProps> = ({
                               >
                                 <DollarSign className="w-3.5 h-3.5" />
                                 <span>Cobrar</span>
+                              </button>
+
+                              <button
+                                onClick={() => {
+                                  kitchenPrinterService.printComanda({
+                                    nTicket: comanda.NTicket,
+                                    fecha: `${comanda.Fecha} ${comanda.HoraCreacion}`,
+                                    cliente: comanda.Cliente,
+                                    tipoServicio: comanda.TipoServicio,
+                                    ubicacion: comanda.Ubicacion,
+                                    items: detalles.map((d) => ({
+                                      nombre: d.Plato,
+                                      cantidad: d.Cantidad,
+                                    })),
+                                    notas: comanda.Notas,
+                                  });
+                                }}
+                                title="Reimprimir comanda en Impresora Bluetooth / Térmica de Cocina"
+                                className="p-2 bg-stone-800 hover:bg-stone-700 text-amber-400 hover:text-amber-300 rounded-xl transition-colors"
+                              >
+                                <Printer className="w-4 h-4" />
                               </button>
 
                               <button

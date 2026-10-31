@@ -680,6 +680,265 @@ export const HistorialVentasView: React.FC<HistorialVentasViewProps> = ({ initia
         </div>
       )}
 
+      {/* SUBTAB 4: MARGEN DE GANANCIA POR PRODUCTO Y TOTAL */}
+      {activeSubTab === 'margen_ganancia' && (
+        <div className="space-y-6">
+          {/* Header & Controls */}
+          <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4 bg-stone-900 border border-stone-800 p-4 rounded-2xl shadow-sm">
+            <div className="flex-1">
+              <div className="flex items-center space-x-2">
+                <span className="p-1.5 rounded-lg bg-emerald-950/60 text-emerald-400 border border-emerald-800/60">
+                  <TrendingUp className="w-4 h-4" />
+                </span>
+                <h3 className="font-bold text-stone-100 text-sm">
+                  Análisis de Margen de Ganancia y Rentabilidad
+                </h3>
+                <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-stone-800 text-stone-300">
+                  {fechaInicial === fechaFinal ? `Día: ${fechaInicial}` : `${fechaInicial} al ${fechaFinal}`}
+                </span>
+              </div>
+              <p className="text-xs text-stone-400 mt-1">
+                Calcula la ganancia bruta y porcentaje de margen por producto vendido cruzando con los costos de recetas (Escandallos) o estimación estándar.
+              </p>
+            </div>
+
+            {/* Filter, Sort & Print Actions */}
+            <div className="flex flex-wrap items-center gap-2.5">
+              {/* Search input */}
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={margenSearchQuery}
+                  onChange={(e) => setMargenSearchQuery(e.target.value)}
+                  placeholder="Buscar producto..."
+                  className="pl-8 pr-3 py-1.5 bg-stone-950 border border-stone-700 rounded-xl text-stone-100 text-xs focus:outline-none focus:border-emerald-500 w-44"
+                />
+              </div>
+
+              {/* Order by */}
+              <div className="flex items-center space-x-1.5 bg-stone-950 border border-stone-700 px-2.5 py-1.5 rounded-xl text-xs">
+                <ArrowUpDown className="w-3.5 h-3.5 text-stone-400" />
+                <label className="text-stone-400 text-[11px]">Orden:</label>
+                <select
+                  value={sortMargenBy}
+                  onChange={(e) => setSortMargenBy(e.target.value as any)}
+                  className="bg-transparent text-stone-200 text-xs font-semibold focus:outline-none cursor-pointer"
+                >
+                  <option value="ganancia" className="bg-stone-900">Mayor Ganancia ($)</option>
+                  <option value="margen" className="bg-stone-900">Mayor Margen (%)</option>
+                  <option value="cantidad" className="bg-stone-900">Más Vendidos (Cant.)</option>
+                  <option value="venta" className="bg-stone-900">Mayor Venta ($)</option>
+                </select>
+              </div>
+
+              {/* Print Report Button */}
+              <button
+                onClick={() => setIsPrintMargenReportOpen(true)}
+                className="flex items-center space-x-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-md transition-all cursor-pointer"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                <span>Imprimir Reporte</span>
+              </button>
+            </div>
+          </div>
+
+          {/* 4 KPI Cards for Profit Summary */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="bg-stone-900/90 border border-stone-800 rounded-2xl p-4 shadow-sm">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-stone-400 block mb-1">
+                Ventas Totales
+              </span>
+              <p className="text-2xl font-black text-amber-400 tracking-tight">
+                {formatPrice(totalVentasMargen)}
+              </p>
+              <p className="text-[11px] text-stone-400 mt-1">
+                {totalUnidadesVendidas} unidades vendidas
+              </p>
+            </div>
+
+            <div className="bg-stone-900/90 border border-stone-800 rounded-2xl p-4 shadow-sm">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-stone-400 block mb-1">
+                Costo Total Insumos
+              </span>
+              <p className="text-2xl font-black text-rose-400 tracking-tight">
+                {formatPrice(totalCostoMargen)}
+              </p>
+              <p className="text-[11px] text-stone-400 mt-1">
+                {totalVentasMargen > 0 ? ((totalCostoMargen / totalVentasMargen) * 100).toFixed(1) : 0}% de las ventas
+              </p>
+            </div>
+
+            <div className="bg-stone-900/90 border border-emerald-900/60 bg-gradient-to-br from-stone-900 to-emerald-950/20 rounded-2xl p-4 shadow-sm">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-400 block mb-1">
+                Ganancia Neta Total
+              </span>
+              <p className="text-2xl font-black text-emerald-400 tracking-tight">
+                {formatPrice(totalGananciaMargen)}
+              </p>
+              <p className="text-[11px] text-stone-400 mt-1">
+                Margen neto en el período
+              </p>
+            </div>
+
+            <div className="bg-stone-900/90 border border-stone-800 rounded-2xl p-4 shadow-sm">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-stone-400 block mb-1">
+                Margen Rentabilidad %
+              </span>
+              <p className="text-2xl font-black text-sky-400 tracking-tight">
+                {margenGlobalPorcentaje}%
+              </p>
+              <p className="text-[11px] text-stone-400 mt-1">
+                Promedio global ponderado
+              </p>
+            </div>
+          </div>
+
+          {/* Table of Products and Profits */}
+          <div className="bg-stone-900 border border-stone-800 rounded-2xl shadow-xl overflow-hidden">
+            <div className="p-4 bg-stone-950/80 border-b border-stone-800 flex items-center justify-between">
+              <div>
+                <h4 className="font-black text-stone-100 text-sm flex items-center space-x-2">
+                  <span>Desglose por Producto y Ganancia Bruta</span>
+                  <span className="text-xs font-mono font-normal text-stone-400">
+                    ({margenProductos.length} productos registrados)
+                  </span>
+                </h4>
+                <p className="text-[11px] text-stone-400 mt-0.5">
+                  Lista ordenada para identificar platos estrella y de mayor contribución económica.
+                </p>
+              </div>
+              <button
+                onClick={handleExportCSV}
+                className="flex items-center space-x-1.5 px-3 py-1.5 bg-stone-800 hover:bg-stone-700 text-stone-200 text-xs font-semibold rounded-xl border border-stone-700 transition-colors"
+              >
+                <Download className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Exportar CSV</span>
+              </button>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-stone-950 text-stone-400 uppercase text-[10px] font-bold border-b border-stone-800">
+                  <tr>
+                    <th className="py-3 px-3 text-center w-10">#</th>
+                    <th className="py-3 px-4">Plato / Producto</th>
+                    <th className="py-3 px-3">Categoría</th>
+                    <th className="py-3 px-3 text-center">Cant.</th>
+                    <th className="py-3 px-3 text-right">P. Venta</th>
+                    <th className="py-3 px-3 text-right">Costo Insumo</th>
+                    <th className="py-3 px-3 text-right">Venta Total</th>
+                    <th className="py-3 px-3 text-right">Costo Total</th>
+                    <th className="py-3 px-4 text-right">Ganancia ($)</th>
+                    <th className="py-3 px-4 text-center w-36">% Margen</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-stone-800/80">
+                  {margenProductos.length === 0 ? (
+                    <tr>
+                      <td colSpan={10} className="py-8 text-center text-stone-400">
+                        No se registraron ventas en el período seleccionado.
+                      </td>
+                    </tr>
+                  ) : (
+                    margenProductos.map((item, idx) => (
+                      <tr key={item.plato} className="hover:bg-stone-800/40 transition-colors">
+                        <td className="py-3 px-3 text-center font-mono text-stone-400 text-[11px]">
+                          {idx + 1}
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="font-bold text-stone-100 text-xs">{item.plato}</div>
+                          <div className="text-[10px] mt-0.5">
+                            {item.tieneReceta ? (
+                              <span className="inline-flex items-center text-emerald-400 font-semibold space-x-1">
+                                <Check className="w-3 h-3" />
+                                <span>Receta vinculada (Escandallo)</span>
+                              </span>
+                            ) : (
+                              <span className="text-stone-400">
+                                Costo est. 35% del precio
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-3 px-3">
+                          <span className="px-2 py-0.5 rounded text-[10px] bg-stone-800 text-amber-400 font-semibold">
+                            {item.categoria}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 text-center font-bold text-stone-100">
+                          {item.cantidad}
+                        </td>
+                        <td className="py-3 px-3 text-right font-mono text-stone-300">
+                          {formatPrice(item.precioPromedio)}
+                        </td>
+                        <td className="py-3 px-3 text-right font-mono text-stone-300">
+                          {formatPrice(item.costoUnitario)}
+                        </td>
+                        <td className="py-3 px-3 text-right font-mono font-bold text-amber-400">
+                          {formatPrice(item.ventaTotal)}
+                        </td>
+                        <td className="py-3 px-3 text-right font-mono text-rose-300">
+                          {formatPrice(item.costoTotal)}
+                        </td>
+                        <td className="py-3 px-4 text-right">
+                          <span className={`font-mono font-black text-sm ${item.gananciaTotal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {formatPrice(item.gananciaTotal)}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="flex items-center justify-between space-x-2 text-[11px]">
+                            <span className="font-bold text-stone-200">{item.margenPorcentaje}%</span>
+                            <div className="w-16 h-2 bg-stone-800 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full rounded-full ${
+                                  item.margenPorcentaje >= 60
+                                    ? 'bg-emerald-500'
+                                    : item.margenPorcentaje >= 40
+                                    ? 'bg-amber-500'
+                                    : 'bg-rose-500'
+                                }`}
+                                style={{ width: `${Math.min(Math.max(item.margenPorcentaje, 0), 100)}%` }}
+                              />
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+                {margenProductos.length > 0 && (
+                  <tfoot className="bg-stone-950 font-black border-t-2 border-stone-700 text-xs">
+                    <tr>
+                      <td colSpan={3} className="py-3 px-4 uppercase text-stone-300">
+                        Totales Consolidados ({margenProductos.length} productos):
+                      </td>
+                      <td className="py-3 px-3 text-center text-stone-100">
+                        {totalUnidadesVendidas}
+                      </td>
+                      <td className="py-3 px-3 text-right text-stone-400">--</td>
+                      <td className="py-3 px-3 text-right text-stone-400">--</td>
+                      <td className="py-3 px-3 text-right text-amber-400">
+                        {formatPrice(totalVentasMargen)}
+                      </td>
+                      <td className="py-3 px-3 text-right text-rose-400">
+                        {formatPrice(totalCostoMargen)}
+                      </td>
+                      <td className="py-3 px-4 text-right text-emerald-400 text-sm">
+                        {formatPrice(totalGananciaMargen)}
+                      </td>
+                      <td className="py-3 px-4 text-center text-sky-400 text-sm">
+                        {margenGlobalPorcentaje}%
+                      </td>
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* MODAL: REGISTROS DE LA TABLA 'DETALLES' DEL TICKET SELECCIONADO */}
       {isDetailsModalOpen && selectedTicketVenta && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
@@ -799,6 +1058,79 @@ export const HistorialVentasView: React.FC<HistorialVentasViewProps> = ({ initia
         detalles={selectedTicketDetalles}
         isOpen={isTicketModalOpen}
         onClose={() => setIsTicketModalOpen(false)}
+      />
+
+      {/* PRINTABLE PROFIT MARGIN REPORT MODAL */}
+      <PrintReportModal
+        isOpen={isPrintMargenReportOpen}
+        onClose={() => setIsPrintMargenReportOpen(false)}
+        title="Reporte de Margen de Ganancia y Rentabilidad"
+        subtitle={`Período analizado: ${fechaInicial === fechaFinal ? `Día ${fechaInicial}` : `Desde ${fechaInicial} hasta ${fechaFinal}`}`}
+        categoryBadge="Contabilidad & Costos"
+        summaryCards={[
+          {
+            label: 'Ventas Totales',
+            value: formatPrice(totalVentasMargen),
+            subtext: `${totalUnidadesVendidas} unidades vendidas`,
+            isHighlight: false,
+          },
+          {
+            label: 'Costo Insumos',
+            value: formatPrice(totalCostoMargen),
+            subtext: totalVentasMargen > 0 ? `${((totalCostoMargen / totalVentasMargen) * 100).toFixed(1)}% de ventas` : '0%',
+            isHighlight: false,
+          },
+          {
+            label: 'Ganancia Neta',
+            value: formatPrice(totalGananciaMargen),
+            subtext: 'Margen neto consolidado',
+            isHighlight: true,
+          },
+          {
+            label: 'Margen Global %',
+            value: `${margenGlobalPorcentaje}%`,
+            subtext: 'Rentabilidad promedio',
+            isHighlight: true,
+          },
+        ]}
+        columns={[
+          { header: '#', align: 'center' },
+          { header: 'Plato / Producto', align: 'left' },
+          { header: 'Categoría', align: 'left' },
+          { header: 'Cant.', align: 'center' },
+          { header: 'P. Prom.', align: 'right' },
+          { header: 'Costo Unit.', align: 'right' },
+          { header: 'Venta Total', align: 'right' },
+          { header: 'Costo Total', align: 'right' },
+          { header: 'Ganancia', align: 'right' },
+          { header: '% Margen', align: 'right' },
+        ]}
+        rows={margenProductos.map((m, idx) => [
+          idx + 1,
+          m.plato,
+          m.categoria,
+          m.cantidad,
+          formatPrice(m.precioPromedio),
+          `${formatPrice(m.costoUnitario)} ${m.tieneReceta ? '(Receta)' : '(Est.)'}`,
+          formatPrice(m.ventaTotal),
+          formatPrice(m.costoTotal),
+          formatPrice(m.gananciaTotal),
+          `${m.margenPorcentaje}%`,
+        ])}
+        footerRow={[
+          '--',
+          `TOTALES (${margenProductos.length} productos)`,
+          '--',
+          totalUnidadesVendidas,
+          '--',
+          '--',
+          formatPrice(totalVentasMargen),
+          formatPrice(totalCostoMargen),
+          formatPrice(totalGananciaMargen),
+          `${margenGlobalPorcentaje}%`,
+        ]}
+        notes="* Los costos unitarios marcados con '(Receta)' provienen del costeo real de ingredientes en el módulo de Escandallos del Inventario. Los marcados con '(Est.)' corresponden al 35% del precio de venta para productos sin receta registrada."
+        downloadFilename={`Reporte_Margen_Ganancia_${fechaInicial}_al_${fechaFinal}.csv`}
       />
 
     </div>

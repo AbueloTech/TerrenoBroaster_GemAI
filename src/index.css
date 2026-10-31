@@ -26,6 +26,21 @@
     background: #ffffff !important;
   }
 
+  #kitchen-receipt, #kitchen-receipt * {
+    visibility: visible;
+  }
+  #kitchen-receipt {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 80mm !important;
+    padding: 3mm !important;
+    margin: 0 !important;
+    color: #000000 !important;
+    background: #ffffff !important;
+    font-family: monospace !important;
+  }
+
   #printable-report, #printable-report * {
     visibility: visible;
   }

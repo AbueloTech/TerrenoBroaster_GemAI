@@ -7,13 +7,14 @@ import {
   LogIn,
   LogOut,
   Clock,
-  Database,
   MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
+  Bluetooth,
 } from 'lucide-react';
 import { Usuario } from '../types';
 import { BrandLogo } from './BrandLogo';
+import { kitchenPrinterService } from '../services/kitchenPrinterService';
 
 export type NavTab = 'pos' | 'comandas' | 'platos' | 'inventario' | 'historial' | 'dashboard';
 
@@ -54,6 +55,16 @@ export const Navbar: React.FC<NavbarProps> = ({
   activeComandasCount = 0,
 }) => {
   const [timeStr, setTimeStr] = useState<string>('');
+  const [isBtConnected, setIsBtConnected] = useState<boolean>(kitchenPrinterService.isBluetoothConnected());
+  const [btName, setBtName] = useState<string>(kitchenPrinterService.getConnectedPrinterName());
+
+  useEffect(() => {
+    const unsub = kitchenPrinterService.subscribeConnectionChange((connected, name) => {
+      setIsBtConnected(connected);
+      setBtName(name);
+    });
+    return unsub;
+  }, []);
 
   useEffect(() => {
     const updateTime = () => {
@@ -126,6 +137,22 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* Right: Real-time Clock, Direct QR button, WhatsApp & User */}
           <div className="flex items-center space-x-2 sm:space-x-3">
             
+            {/* Bluetooth Kitchen Printer Quick Button */}
+            <button
+              onClick={() => kitchenPrinterService.connectBluetoothPrinter()}
+              title={
+                isBtConnected
+                  ? `Impresora Bluetooth Cocina Conectada: ${btName}`
+                  : 'Vincular Impresora Bluetooth de Cocina'
+              }
+              className="flex items-center space-x-1.5 px-2.5 py-1.5 bg-stone-950 hover:bg-stone-800 rounded-xl border border-stone-800 text-xs font-semibold transition-all cursor-pointer shrink-0"
+            >
+              <Bluetooth className={`w-3.5 h-3.5 ${isBtConnected ? 'text-emerald-400 animate-pulse' : 'text-blue-400'}`} />
+              <span className="hidden xl:inline text-[11px] text-stone-300">
+                {isBtConnected ? `BT: ${btName}` : 'BT Cocina'}
+              </span>
+            </button>
+
             {/* Live Time Clock */}
             {timeStr && (
               <div className="hidden md:flex items-center space-x-1.5 px-3 py-1.5 bg-stone-950 rounded-xl border border-stone-800 text-stone-300 font-mono text-xs shadow-inner">

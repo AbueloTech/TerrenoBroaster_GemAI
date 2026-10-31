@@ -3,6 +3,7 @@ import { Plato, CartItem, FormaPago, Venta, DetalleVenta, TipoServicio, Ubicacio
 import { imageService } from '../services/imageService';
 import { sqliteService } from '../db/sqliteService';
 import { formatPrice, safeParsePrice } from '../utils/currency';
+import { kitchenPrinterService } from '../services/kitchenPrinterService';
 import confetti from 'canvas-confetti';
 import {
   Search,
@@ -224,10 +225,25 @@ export const POSView: React.FC<POSViewProps> = ({
         playBeep(880, 0.12);
         setTimeout(() => playBeep(1174, 0.14), 110);
 
+        // Print addendum kitchen ticket
+        kitchenPrinterService.printComanda({
+          nTicket: `${activeComandaOnLocation.NTicket} (Extra)`,
+          fecha: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          cliente: activeComandaOnLocation.Cliente,
+          tipoServicio: tipoServicio,
+          ubicacion: ubicacionMesa,
+          items: cart.map((c) => ({
+            nombre: c.plato.Plato,
+            cantidad: c.cantidad,
+            notas: c.nota,
+          })),
+          notas: '*** PLATOS AGREGADOS A MESA ACTIVA ***',
+        });
+
         setCart([]);
         setComandaNotas('');
         setSentToast({
-          message: `¡Platos agregados exitosamente a la Comanda ${activeComandaOnLocation.NTicket} de ${ubicacionMesa}!`,
+          message: `¡Platos agregados e impresos en Cocina para ${activeComandaOnLocation.NTicket} de ${ubicacionMesa}!`,
           ticket: activeComandaOnLocation.NTicket,
         });
         setTimeout(() => setSentToast(null), 6000);
@@ -266,6 +282,23 @@ export const POSView: React.FC<POSViewProps> = ({
         cart
       );
 
+      // Print ticket to Bluetooth / Thermal printer in kitchen!
+      kitchenPrinterService.printComanda({
+        nTicket: nextTicket,
+        fecha: `${dateStr} ${timeStr}`,
+        cliente: cliente.trim() || 'Consumidor Final',
+        tipoServicio: tipoServicio,
+        ubicacion: finalUbicacion,
+        items: cart.map((c) => ({
+          nombre: c.plato.Plato,
+          cantidad: c.cantidad,
+          notas: c.nota,
+        })),
+        notas: fullNotas,
+        telefono: deliveryTelefono,
+        direccion: deliveryDireccion,
+      });
+
       // Play chime
       playBeep(880, 0.12);
       setTimeout(() => playBeep(1174, 0.14), 110);
@@ -274,7 +307,7 @@ export const POSView: React.FC<POSViewProps> = ({
       setCart([]);
       setComandaNotas('');
       setSentToast({
-        message: `¡Comanda ${nextTicket} enviada a Cocina para ${finalUbicacion}!`,
+        message: `¡Comanda ${nextTicket} enviada e impresa en Cocina para ${finalUbicacion}!`,
         ticket: nextTicket,
       });
       setTimeout(() => setSentToast(null), 6000);

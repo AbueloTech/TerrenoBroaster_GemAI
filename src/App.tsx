@@ -19,6 +19,7 @@ import { LoginModal } from './components/LoginModal';
 import { WhatsAppOrdersModal } from './components/WhatsAppOrdersModal';
 import { WhatsAppQrModal } from './components/WhatsAppQrModal';
 import { AlertSettingsModal } from './components/AlertSettingsModal';
+import { KitchenTicketModal } from './components/KitchenTicketModal';
 import { CustomerMenuView } from './components/CustomerMenuView';
 import { menuSyncService } from './services/menuSyncService';
 import { playWhatsAppIncomingAlert, playNotificationSound } from './utils/soundAlert';
@@ -674,6 +675,9 @@ export default function App() {
         isOpen={isAlertSettingsModalOpen}
         onClose={() => setIsAlertSettingsModalOpen(false)}
       />
+
+      {/* Global Kitchen Bluetooth / Thermal Print Modal */}
+      <KitchenTicketModal />
 
     </div>
   );
