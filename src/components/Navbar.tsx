@@ -211,17 +211,28 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <button
                   type="button"
                   onClick={onOpenLoginModal}
-                  title={`Usuario: ${currentUser.Username} (${currentUser.Role || 'Admin'})`}
-                  className="flex items-center space-x-1.5 px-2.5 py-1.5 bg-stone-950 hover:bg-stone-800 rounded-xl border border-stone-800 text-xs transition-colors group cursor-pointer"
+                  title={`Usuario: ${currentUser.Username} • Rol: ${currentUser.Role || 'Administrador'} (Clic para cambiar usuario)`}
+                  className="flex items-center space-x-2 px-2.5 py-1.5 bg-stone-950 hover:bg-stone-800 rounded-xl border border-stone-800 text-xs transition-colors group cursor-pointer"
                 >
                   <User className="w-3.5 h-3.5 text-amber-400 group-hover:scale-110 transition-transform" />
                   <span className="font-bold text-stone-200 hidden sm:inline">{currentUser.Username}</span>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold border hidden md:inline ${
+                    currentUser.Role === 'Administrador'
+                      ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                      : currentUser.Role === 'Cajero'
+                      ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                      : currentUser.Role === 'Cocinero'
+                      ? 'bg-orange-500/15 text-orange-300 border-orange-500/30'
+                      : 'bg-sky-500/15 text-sky-300 border-sky-500/30'
+                  }`}>
+                    {currentUser.Role || 'Administrador'}
+                  </span>
                 </button>
                 {onLogout && (
                   <button
                     onClick={onLogout}
-                    title="Cerrar Sesión"
-                    className="p-2 rounded-xl bg-stone-800 hover:bg-rose-950/60 hover:text-rose-400 text-stone-400 border border-stone-700 transition-colors"
+                    title="Cerrar Sesión / Salir"
+                    className="p-2 rounded-xl bg-stone-800 hover:bg-rose-950/60 hover:text-rose-400 text-stone-400 border border-stone-700 transition-colors cursor-pointer"
                   >
                     <LogOut className="w-4 h-4" />
                   </button>

@@ -14,15 +14,14 @@ export const BrandLogo: React.FC<BrandLogoProps> = ({
       className={`relative overflow-hidden rounded-xl border border-amber-500/40 bg-stone-900 shadow-md shadow-amber-500/20 shrink-0 flex items-center justify-center ${className}`}
     >
       <img
-        src="/api/images/pollobroaster.jpg"
+        src="/pollobroaster.jpg"
         alt="Logo Terreno Broaster"
         loading="eager"
         className={imgClassName}
         onError={(e) => {
           const target = e.target as HTMLImageElement;
           target.onerror = null;
-          // Fallback to terrenobroaster or broaster1 if pollobroaster not found
-          target.src = '/api/images/broaster1.jpg';
+          target.src = '/api/images/pollobroaster.jpg';
         }}
       />
     </div>

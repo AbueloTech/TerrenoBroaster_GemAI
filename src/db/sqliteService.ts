@@ -521,14 +521,34 @@ class SQLiteService {
   private seedAdminUserIfNotExist() {
     if (!this.db) return;
     try {
-      const uRes = this.db.exec("SELECT COUNT(*) FROM Usuarios WHERE Username = 'admin'");
-      const uCount = uRes.length > 0 && uRes[0].values[0] ? Number(uRes[0].values[0][0]) : 0;
-      if (uCount === 0) {
-        const now = new Date().toISOString().substring(0, 10);
-        this.db.run(
-          "INSERT INTO Usuarios (Username, Password, Role, FechaRegistro) VALUES ('admin', 'admin123', 'admin', ?)",
-          [now]
-        );
+      const now = new Date().toISOString().substring(0, 10);
+      const defaultUsers = [
+        { user: 'admin', pass: 'admin123', role: 'Administrador' },
+        { user: 'cajero', pass: 'cajero123', role: 'Cajero' },
+        { user: 'cocina', pass: 'cocina123', role: 'Cocinero' },
+        { user: 'mesero', pass: 'mesero123', role: 'Mesero' },
+      ];
+
+      for (const du of defaultUsers) {
+        const uRes = this.db.exec(`SELECT COUNT(*) FROM Usuarios WHERE LOWER(Username) = '${du.user.toLowerCase()}'`);
+        const uCount = uRes.length > 0 && uRes[0].values[0] ? Number(uRes[0].values[0][0]) : 0;
+        if (uCount === 0) {
+          this.db.run(
+            "INSERT INTO Usuarios (Username, Password, Role, FechaRegistro) VALUES (?, ?, ?, ?)",
+            [du.user, du.pass, du.role, now]
+          );
+        }
+      }
+
+      // Also ensure fallback array has default users if empty
+      if (this.fallbackUsuarios.length === 0) {
+        this.fallbackUsuarios = defaultUsers.map((du, idx) => ({
+          Id: idx + 1,
+          Username: du.user,
+          Password: du.pass,
+          Role: du.role as any,
+          FechaRegistro: now,
+        }));
       }
     } catch {
       // ignore

@@ -90,11 +90,13 @@ export interface DailySaleStat {
   platoTop?: string;
 }
 
+export type UserRole = 'Administrador' | 'Cajero' | 'Cocinero' | 'Mesero' | 'Supervisor';
+
 export interface Usuario {
   Id?: number;
   Username: string;
   Password?: string;
-  Role: 'Administrador' | 'Cajero' | 'Supervisor';
+  Role: UserRole;
   FechaRegistro?: string;
   UltimoAcceso?: string;
 }
