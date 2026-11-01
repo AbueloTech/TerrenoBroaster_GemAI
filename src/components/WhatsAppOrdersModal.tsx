@@ -327,17 +327,25 @@ export const WhatsAppOrdersModal: React.FC<WhatsAppOrdersModalProps> = ({
     showToast(`Items de ${pedido.NombreCliente} cargados en el Punto de Venta.`);
   };
 
-  // Status Change (if changed to En Cocina, triggers automatic print)
+  // Status Change (if changed to En Cocina, triggers automatic comanda creation, kitchen timer and print)
   const handleChangeStatus = async (id: number, nuevoEstado: EstadoPedidoWhatsApp) => {
-    sqliteService.updatePedidoWhatsAppEstado(id, nuevoEstado);
-    showToast(`Estado actualizado a: ${nuevoEstado}`);
-
     if (nuevoEstado === 'En Cocina') {
       const target = pedidos.find((p) => p.Id === id);
       if (target) {
-        await handlePrintKitchenTicket(target);
+        if (!target.NTicket) {
+          await handleConvertToComanda(target);
+          return;
+        } else {
+          sqliteService.updatePedidoWhatsAppEstado(id, 'En Cocina');
+          await handlePrintKitchenTicket(target);
+          showToast(`¡Pedido enviado a Cocina con comanda e imprimiendo ticket!`);
+          return;
+        }
       }
     }
+
+    sqliteService.updatePedidoWhatsAppEstado(id, nuevoEstado);
+    showToast(`Estado actualizado a: ${nuevoEstado}`);
   };
 
   // Delete

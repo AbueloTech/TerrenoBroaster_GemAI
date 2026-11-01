@@ -232,3 +232,24 @@ export interface MovimientoInventario {
   Notas?: string;
 }
 
+export interface CierreCaja {
+  CierreId: number;
+  Fecha: string; // 'YYYY-MM-DD'
+  Hora: string; // 'HH:mm:ss'
+  TotalVentas: number;
+  TotalPedidos: number;
+  TicketPromedio: number;
+  TotalEfectivo: number;
+  TotalPagoMovil: number;
+  TotalPuntoVenta: number;
+  TotalTransferencia: number;
+  FondoInicial: number;
+  EfectivoEsperado: number;
+  EfectivoContado: number;
+  Diferencia: number;
+  Cajero: string;
+  Notas?: string;
+  ArchivoGuardado: boolean;
+}
+
+

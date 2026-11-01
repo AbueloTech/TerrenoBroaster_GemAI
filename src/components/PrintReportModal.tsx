@@ -43,7 +43,7 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
 }) => {
   if (!isOpen) return null;
 
-  const nowStr = new Date().toLocaleString('es-VE', {
+  const nowStr = new Date().toLocaleString('es-CO', {
     dateStyle: 'medium',
     timeStyle: 'short',
   });

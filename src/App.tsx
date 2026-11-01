@@ -21,6 +21,7 @@ import { WhatsAppQrModal } from './components/WhatsAppQrModal';
 import { AlertSettingsModal } from './components/AlertSettingsModal';
 import { KitchenTicketModal } from './components/KitchenTicketModal';
 import { CustomerMenuView } from './components/CustomerMenuView';
+import { CierreCajaModal } from './components/CierreCajaModal';
 import { menuSyncService } from './services/menuSyncService';
 import { playWhatsAppIncomingAlert, playNotificationSound } from './utils/soundAlert';
 import { formatCurrency } from './utils/currency';
@@ -112,6 +113,7 @@ export default function App() {
   const [isWhatsAppModalOpen, setIsWhatsAppModalOpen] = useState(false);
   const [isAlertSettingsModalOpen, setIsAlertSettingsModalOpen] = useState(false);
   const [isDirectQrModalOpen, setIsDirectQrModalOpen] = useState(false);
+  const [isCierreCajaModalOpen, setIsCierreCajaModalOpen] = useState(false);
 
   // Completed sale ticket modal
   const [latestSaleTicket, setLatestSaleTicket] = useState<Venta | null>(null);
@@ -239,11 +241,14 @@ export default function App() {
           }));
 
           const now = new Date();
-          const fechaStr = now.toISOString().split('T')[0];
-          const horaStr = now.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+          const localYear = now.getFullYear();
+          const localMonth = String(now.getMonth() + 1).padStart(2, '0');
+          const localDay = String(now.getDate()).padStart(2, '0');
+          const fechaStr = `${localYear}-${localMonth}-${localDay}`;
+          const horaStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
 
           sqliteService.addPedidoWhatsApp({
-            Fecha: `${fechaStr} ${horaStr}`,
+            Fecha: `${fechaStr} ${horaStr.substring(0, 5)}`,
             TelefonoCliente: raw.telefonoCliente || '',
             NombreCliente: raw.nombreCliente || 'Cliente Web',
             TipoEntrega: raw.tipoEntrega || 'Delivery',
@@ -253,7 +258,7 @@ export default function App() {
             Total: raw.total || 0,
             FormaPago: raw.formaPago || 'Efectivo',
             Estado: 'Pendiente',
-            FechaCreacion: now.toISOString(),
+            FechaCreacion: horaStr,
             Notas: raw.notas || '',
           });
 
@@ -351,6 +356,7 @@ export default function App() {
         isSidebarExpanded={isSidebarExpanded}
         onOpenQrModal={() => setIsDirectQrModalOpen(true)}
         onOpenWhatsAppModal={() => setIsWhatsAppModalOpen(true)}
+        onOpenCierreCajaModal={() => setIsCierreCajaModalOpen(true)}
         onOpenLoginModal={() => setIsLoginModalOpen(true)}
         onLogout={handleLogout}
         currentUser={currentUser}
@@ -377,6 +383,7 @@ export default function App() {
           onOpenGithubModal={() => setIsGithubModalOpen(true)}
           onOpenImageModal={() => setIsImageModalOpen(true)}
           onOpenWhatsAppModal={() => setIsWhatsAppModalOpen(true)}
+          onOpenCierreCajaModal={() => setIsCierreCajaModalOpen(true)}
           onOpenAlertSettingsModal={() => setIsAlertSettingsModalOpen(true)}
           onOpenCustomerMenu={() => window.open('/cliente', '_blank')}
           onOpenQrModal={() => setIsDirectQrModalOpen(true)}
@@ -586,7 +593,9 @@ export default function App() {
         )}
 
         {currentTab === 'historial' && (
-          <HistorialVentasView />
+          <HistorialVentasView
+            onOpenCierreCajaModal={() => setIsCierreCajaModalOpen(true)}
+          />
         )}
 
         {currentTab === 'dashboard' && (
@@ -678,6 +687,13 @@ export default function App() {
 
       {/* Global Kitchen Bluetooth / Thermal Print Modal */}
       <KitchenTicketModal />
+
+      {/* Cierre de Caja & Arqueo del Día Modal */}
+      <CierreCajaModal
+        isOpen={isCierreCajaModalOpen}
+        onClose={() => setIsCierreCajaModalOpen(false)}
+        currentUser={currentUser}
+      />
 
     </div>
   );

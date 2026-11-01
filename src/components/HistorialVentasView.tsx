@@ -29,9 +29,13 @@ import {
 interface HistorialVentasViewProps {
   onReopenTicket?: (venta: Venta, detalles: DetalleVenta[]) => void;
   initialSubTab?: 'ventas' | 'acumulado_productos' | 'acumulado_pagos' | 'margen_ganancia';
+  onOpenCierreCajaModal?: () => void;
 }
 
-export const HistorialVentasView: React.FC<HistorialVentasViewProps> = ({ initialSubTab = 'ventas' }) => {
+export const HistorialVentasView: React.FC<HistorialVentasViewProps> = ({
+  initialSubTab = 'ventas',
+  onOpenCierreCajaModal,
+}) => {
   // Date range defaults: Last 30 days
   const todayStr = new Date().toISOString().split('T')[0];
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
@@ -246,14 +250,26 @@ export const HistorialVentasView: React.FC<HistorialVentasViewProps> = ({ initia
           </p>
         </div>
 
-        {/* Export CSV button */}
-        <button
-          onClick={handleExportCSV}
-          className="flex items-center space-x-2 px-4 py-2.5 bg-stone-800 hover:bg-stone-700 text-stone-200 text-xs font-semibold rounded-xl border border-stone-700 transition-colors shadow-sm"
-        >
-          <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
-          <span>Exportar CSV / Excel</span>
-        </button>
+        <div className="flex items-center space-x-2">
+          {onOpenCierreCajaModal && (
+            <button
+              onClick={onOpenCierreCajaModal}
+              className="flex items-center space-x-2 px-4 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-stone-950 text-xs font-black rounded-xl shadow-md shadow-amber-500/20 transition-all active:scale-95 cursor-pointer"
+            >
+              <Calculator className="w-4 h-4 text-stone-950" />
+              <span>Cierre de Caja del Día</span>
+            </button>
+          )}
+
+          {/* Export CSV button */}
+          <button
+            onClick={handleExportCSV}
+            className="flex items-center space-x-2 px-4 py-2.5 bg-stone-800 hover:bg-stone-700 text-stone-200 text-xs font-semibold rounded-xl border border-stone-700 transition-colors shadow-sm cursor-pointer"
+          >
+            <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+            <span>Exportar CSV / Excel</span>
+          </button>
+        </div>
       </div>
 
       {/* DATE RANGE FILTER CONTAINER */}

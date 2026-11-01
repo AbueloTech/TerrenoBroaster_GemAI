@@ -129,70 +129,75 @@ export const ComandasMonitorView: React.FC<ComandasMonitorViewProps> = ({
     try {
       const nowMs = currentTime.getTime();
 
-      // 1. Prioritize horaCreacion if it contains time components (HH:mm or HH:mm:ss)
-      const cleanTime = (horaCreacion || '').trim();
-      if (cleanTime && cleanTime.includes(':')) {
-        const timeParts = cleanTime.split(':').map((p) => parseInt(p, 10));
+      // Normalize time string: if full ISO timestamp, extract time part or parse directly
+      let rawTime = (horaCreacion || '').trim();
+      let extractedDate = fechaStr ? fechaStr.trim() : '';
+
+      if (rawTime.includes('T')) {
+        const parts = rawTime.split('T');
+        if (!extractedDate && parts[0]) {
+          extractedDate = parts[0];
+        }
+        rawTime = parts[1].replace('Z', '').split('.')[0];
+      } else if (rawTime.includes(' ')) {
+        const parts = rawTime.split(' ');
+        if (!extractedDate && parts[0] && parts[0].includes('-')) {
+          extractedDate = parts[0];
+        }
+        rawTime = parts[parts.length - 1];
+      }
+
+      // 1. Process time components (HH:mm:ss or HH:mm)
+      if (rawTime && rawTime.includes(':')) {
+        const timeParts = rawTime.split(':').map((p) => parseInt(p, 10));
         if (timeParts.length >= 2 && !isNaN(timeParts[0]) && !isNaN(timeParts[1])) {
           const h = timeParts[0];
           const m = timeParts[1];
           const s = timeParts[2] && !isNaN(timeParts[2]) ? timeParts[2] : 0;
 
-          const orderDate = new Date(currentTime);
-          if (fechaStr && fechaStr.includes('-')) {
-            const dateOnly = fechaStr.split(' ')[0].split('T')[0];
-            const dp = dateOnly.split('-').map(Number);
-            if (dp.length === 3 && dp[0] > 2000) {
-              orderDate.setFullYear(dp[0], dp[1] - 1, dp[2]);
+          if (h >= 0 && h < 24 && m >= 0 && m < 60) {
+            const orderDate = new Date(currentTime);
+            if (extractedDate && extractedDate.includes('-')) {
+              const dateOnly = extractedDate.split(' ')[0].split('T')[0];
+              const dp = dateOnly.split('-').map(Number);
+              if (dp.length === 3 && dp[0] > 2000) {
+                orderDate.setFullYear(dp[0], dp[1] - 1, dp[2]);
+              }
             }
-          }
 
-          orderDate.setHours(h, m, s, 0);
-          let diffMs = nowMs - orderDate.getTime();
+            orderDate.setHours(h, m, s, 0);
+            let diffMs = nowMs - orderDate.getTime();
 
-          // Handle UTC vs local timezone difference if order was generated with UTC offset
-          if (diffMs < 0) {
-            const tzDiff = currentTime.getTimezoneOffset() * 60 * 1000;
-            if (diffMs + tzDiff >= 0) {
-              diffMs += tzDiff;
-            } else if (diffMs - tzDiff >= 0) {
-              diffMs -= tzDiff;
-            } else {
+            // If diffMs is within 2 minutes into the future (minor clock skew), treat as 0-1s elapsed
+            if (diffMs < 0 && diffMs > -120000) {
               diffMs = 0;
+            } else if (diffMs < 0) {
+              // Timezone offset mismatch (e.g. UTC vs local time)
+              const tzDiff = currentTime.getTimezoneOffset() * 60 * 1000;
+              if (diffMs + tzDiff >= 0 && diffMs + tzDiff < 86400000) {
+                diffMs += tzDiff;
+              } else if (diffMs - tzDiff >= 0 && diffMs - tzDiff < 86400000) {
+                diffMs -= tzDiff;
+              } else {
+                // If crossed midnight
+                const oneDayMs = 24 * 60 * 60 * 1000;
+                if (diffMs + oneDayMs > 0 && diffMs + oneDayMs < 43200000) {
+                  diffMs += oneDayMs;
+                }
+              }
             }
-          }
 
-          return Math.max(0, Math.floor(diffMs / 1000));
+            return Math.max(0, Math.floor(diffMs / 1000));
+          }
         }
       }
 
-      // 2. If horaCreacion has full ISO format
-      if (horaCreacion && horaCreacion.includes('T')) {
+      // 2. Direct ISO Parse Fallback
+      if (horaCreacion && (horaCreacion.includes('T') || horaCreacion.includes('-'))) {
         const parsedIso = Date.parse(horaCreacion);
         if (!isNaN(parsedIso)) {
           let diffMs = nowMs - parsedIso;
-          if (diffMs < 0) {
-            const tzDiff = currentTime.getTimezoneOffset() * 60 * 1000;
-            if (diffMs + tzDiff >= 0) diffMs += tzDiff;
-          }
-          return Math.max(0, Math.floor(diffMs / 1000));
-        }
-      }
-
-      // 3. Fallback: Parse fechaStr datetime
-      if (fechaStr) {
-        let isoStr = fechaStr.trim();
-        if (isoStr.includes(' ') && !isoStr.includes('T')) {
-          isoStr = isoStr.replace(' ', 'T');
-        }
-        const parsedDt = Date.parse(isoStr);
-        if (!isNaN(parsedDt)) {
-          let diffMs = nowMs - parsedDt;
-          if (diffMs < 0) {
-            const tzDiff = currentTime.getTimezoneOffset() * 60 * 1000;
-            if (diffMs + tzDiff >= 0) diffMs += tzDiff;
-            else if (diffMs - tzDiff >= 0) diffMs -= tzDiff;
-          }
+          if (diffMs < 0 && diffMs > -120000) diffMs = 0;
           return Math.max(0, Math.floor(diffMs / 1000));
         }
       }

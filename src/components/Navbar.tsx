@@ -11,6 +11,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Bluetooth,
+  Calculator,
 } from 'lucide-react';
 import { Usuario } from '../types';
 import { BrandLogo } from './BrandLogo';
@@ -25,6 +26,7 @@ interface NavbarProps {
   isSidebarExpanded?: boolean;
   onOpenQrModal?: () => void;
   onOpenWhatsAppModal?: () => void;
+  onOpenCierreCajaModal?: () => void;
   onOpenLoginModal?: () => void;
   onLogout?: () => void;
   currentUser?: Usuario | null;
@@ -48,6 +50,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   isSidebarExpanded = true,
   onOpenQrModal,
   onOpenWhatsAppModal,
+  onOpenCierreCajaModal,
   onOpenLoginModal,
   onLogout,
   currentUser,
@@ -187,6 +190,18 @@ export const Navbar: React.FC<NavbarProps> = ({
                     {pendingWhatsAppCount}
                   </span>
                 )}
+              </button>
+            )}
+
+            {/* Essential Action: Cierre de Caja del Día & Arqueo */}
+            {onOpenCierreCajaModal && (
+              <button
+                onClick={onOpenCierreCajaModal}
+                title="Cierre de Caja del Día, Arqueo de Gaveta y Guardado en PC"
+                className="flex items-center space-x-1.5 px-3 py-2 bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 hover:text-amber-200 text-xs font-bold rounded-xl border border-amber-500/40 transition-all shadow-sm active:scale-95 shrink-0 cursor-pointer"
+              >
+                <Calculator className="w-4 h-4 text-amber-400" />
+                <span className="hidden sm:inline">Cierre de Caja</span>
               </button>
             )}
 

@@ -1,7 +1,14 @@
 /**
  * Utilities for parsing and formatting restaurant prices for Terreno Broaster POS.
- * Solves the issue where 8.000 (meaning eight thousand) is wrongly parsed as 8.00.
+ * Tailored for Colombian Pesos (COP):
+ * - Currency: Pesos Colombianos (COP)
+ * - Whole numbers formatted with dot thousands separator (e.g. 50.000, 8.000, 250.000)
+ * - No centavos/decimals used in Colombian restaurant operations.
  */
+
+export const CURRENCY_CODE = 'COP';
+export const CURRENCY_NAME = 'Pesos Colombianos';
+export const CURRENCY_SYMBOL = '$';
 
 export function parsePrice(val: any): number {
   if (val === undefined || val === null || val === '') return 0;
@@ -12,13 +19,8 @@ export function parsePrice(val: any): number {
   let s = String(val).trim();
   if (!s) return 0;
 
-  // Remove currency symbols and spaces
-  s = s.replace(/[\$\sBs\.]/g, (match) => {
-    if (match === '.') {
-      return '';
-    }
-    return '';
-  });
+  // Remove currency symbols, spaces, COP suffixes
+  s = s.replace(/[\$\sCOPcopBs]/g, '');
 
   if (s.includes(',')) {
     s = s.replace(',', '.');
@@ -29,13 +31,13 @@ export function parsePrice(val: any): number {
 }
 
 /**
- * Intelligent price parser that preserves whether dot was thousands or decimal.
+ * Intelligent price parser that preserves Colombian thousands notation.
  * Specifically:
  * - "8.000" => 8000
+ * - "50.000" => 50000
  * - "8000"  => 8000
  * - "8.50"  => 8.5
  * - "8,00"  => 8
- * - "8.00"  => 8
  * - "8.000,50" => 8000.5
  */
 export function safeParsePrice(val: any): number {
@@ -44,10 +46,10 @@ export function safeParsePrice(val: any): number {
     return isNaN(val) ? 0 : val;
   }
 
-  let str = String(val).trim().replace(/[\$]/g, '').trim();
+  let str = String(val).trim().replace(/[\$COPcopBs]/g, '').trim();
 
-  // Pattern: "8.000" or "12.000" or "120.000" (dot followed by 3 digits)
-  // In Latin America / Spanish notation this is a thousands separator!
+  // Pattern: "8.000" or "50.000" or "120.000" (dot followed by 3 digits)
+  // In Colombia / Latin America this is a thousands separator!
   if (/^\d{1,3}(\.\d{3})+$/.test(str)) {
     return parseInt(str.replace(/\./g, ''), 10);
   }
@@ -72,29 +74,41 @@ export function safeParsePrice(val: any): number {
 }
 
 /**
- * Formats price cleanly.
- * If whole number: e.g. 8000 => "$8000" (or "$8000" instead of "$8,00" or "$8.00")
- * If with cents: e.g. 8.50 => "$8.50", 8000.5 => "$8000.50"
+ * Formats price cleanly according to Colombian Pesos (COP) conventions.
+ * Colombian Pesos do not use cents/decimals:
+ * e.g. 8000 => "$ 8.000"
+ *      50000 => "$ 50.000"
+ *      250000 => "$ 250.000"
+ *
+ * @param val Number or string price
+ * @param withCopSuffix If true, outputs "$ 50.000 COP"
  */
-export function formatPrice(val: any): string {
+export function formatPrice(val: any, withCopSuffix: boolean = false): string {
   const num = safeParsePrice(val);
   
-  if (num % 1 === 0) {
-    return `$${num.toString()}`;
-  }
+  // Format in Colombian Pesos standard (thousands separated by dot)
+  const isWhole = Math.abs(num % 1) < 0.001;
+  const formatted = isWhole
+    ? Math.round(num).toLocaleString('es-CO')
+    : num.toLocaleString('es-CO', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 
-  return `$${num.toFixed(2)}`;
+  if (withCopSuffix) {
+    return `$ ${formatted} COP`;
+  }
+  return `$ ${formatted}`;
 }
 
-export const formatCurrency = formatPrice;
+export const formatCurrency = (val: any) => formatPrice(val, false);
+export const formatCurrencyCOP = (val: any) => formatPrice(val, true);
 
 /**
- * Formats price with comma/dot option or plain clean number for inputs
+ * Formats price as clean plain integer or decimal string for input fields
  */
 export function formatPriceClean(val: any): string {
   const num = safeParsePrice(val);
-  if (num % 1 === 0) {
-    return num.toString();
+  if (Math.abs(num % 1) < 0.001) {
+    return Math.round(num).toString();
   }
   return num.toFixed(2);
 }
+

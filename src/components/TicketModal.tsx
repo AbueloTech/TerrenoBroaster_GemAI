@@ -80,7 +80,7 @@ export const TicketModal: React.FC<TicketModalProps> = ({ venta, detalles, isOpe
           <div className="text-center pb-3 border-b border-dashed border-stone-300">
             <h2 className="text-base font-black tracking-wider uppercase text-stone-900">TERRENO BROASTER</h2>
             <p className="text-[11px] text-stone-500">Especialistas en Pollo Broaster</p>
-            <p className="text-[10px] text-stone-400 mt-0.5">RIF: J-50123894-1 • Sucursal Principal</p>
+            <p className="text-[10px] text-stone-400 mt-0.5">NIT: 901.238.941-1 • Colombia</p>
           </div>
 
           <div className="py-2.5 border-b border-dashed border-stone-300 space-y-1">

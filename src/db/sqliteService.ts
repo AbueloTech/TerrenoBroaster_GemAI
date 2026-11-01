@@ -24,6 +24,7 @@ import {
   Proveedor,
   MovimientoInventario,
   TipoMovimientoInventario,
+  CierreCaja,
 } from '../types';
 import { DEFAULT_PLATOS, generateSeedSales, generateSeedComandas } from '../data/defaultData';
 import { safeParsePrice } from '../utils/currency';
@@ -49,6 +50,7 @@ class SQLiteService {
   private fallbackRecetas: RecetaItem[] = [];
   private fallbackProveedores: Proveedor[] = [];
   private fallbackMovimientos: MovimientoInventario[] = [];
+  private fallbackCierres: CierreCaja[] = [];
 
   constructor() {
     this.setupFallback();
@@ -471,6 +473,29 @@ class SQLiteService {
         Referencia TEXT,
         Usuario TEXT,
         Notas TEXT
+      );
+    `);
+
+    // TABLA: CierresCaja (Registro de Cierres de Caja / Cierre del Día / Reporte Z)
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS CierresCaja (
+        CierreId INTEGER PRIMARY KEY AUTOINCREMENT,
+        Fecha TEXT NOT NULL,
+        Hora TEXT NOT NULL,
+        TotalVentas REAL NOT NULL,
+        TotalPedidos INTEGER NOT NULL,
+        TicketPromedio REAL NOT NULL,
+        TotalEfectivo REAL NOT NULL,
+        TotalPagoMovil REAL NOT NULL,
+        TotalPuntoVenta REAL NOT NULL,
+        TotalTransferencia REAL NOT NULL,
+        FondoInicial REAL NOT NULL,
+        EfectivoEsperado REAL NOT NULL,
+        EfectivoContado REAL NOT NULL,
+        Diferencia REAL NOT NULL,
+        Cajero TEXT NOT NULL,
+        Notas TEXT,
+        ArchivoGuardado INTEGER DEFAULT 1
       );
     `);
 
@@ -2061,6 +2086,16 @@ class SQLiteService {
     nTicket?: string,
     comandaId?: number
   ): boolean {
+    const item = this.fallbackPedidosWhatsApp.find((p) => p.Id === id);
+
+    // If changing to 'En Cocina' and it does NOT have a comanda yet, convert it now!
+    if (nuevoEstado === 'En Cocina' && (!nTicket && (!item || !item.NTicket))) {
+      const converted = this.convertWhatsAppPedidoToComanda(id);
+      if (converted) {
+        return true;
+      }
+    }
+
     if (this.db) {
       try {
         const stmt = this.db.prepare(
@@ -2073,7 +2108,6 @@ class SQLiteService {
       }
     }
 
-    const item = this.fallbackPedidosWhatsApp.find((p) => p.Id === id);
     if (item) {
       item.Estado = nuevoEstado;
       if (nTicket) item.NTicket = nTicket;
@@ -2083,34 +2117,38 @@ class SQLiteService {
     // Bidirectional sync: if this WhatsApp order has a linked NTicket or ComandaId, update the Comanda as well!
     const targetTicket = nTicket || (item ? item.NTicket : undefined);
     if (targetTicket) {
-      const nowTime = new Date().toISOString().substring(11, 16);
+      const now = new Date();
+      const localTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+
       if (nuevoEstado === 'En Cocina') {
         if (this.db) {
-          const stmtC = this.db.prepare('UPDATE Comandas SET Estado = "Cocina", HoraActualizacion = ? WHERE NTicket = ?');
-          stmtC.run([nowTime, targetTicket]);
+          // Refresh HoraCreacion to current local time so the kitchen cooking timer starts counting from 00:00!
+          const stmtC = this.db.prepare('UPDATE Comandas SET Estado = "Cocina", HoraCreacion = ?, HoraActualizacion = ? WHERE NTicket = ?');
+          stmtC.run([localTime, localTime, targetTicket]);
           stmtC.free();
         }
         const cIdx = this.fallbackComandas.findIndex((c) => c.NTicket === targetTicket);
         if (cIdx !== -1) {
           this.fallbackComandas[cIdx].Estado = 'Cocina';
-          this.fallbackComandas[cIdx].HoraActualizacion = nowTime;
+          this.fallbackComandas[cIdx].HoraCreacion = localTime;
+          this.fallbackComandas[cIdx].HoraActualizacion = localTime;
         }
       } else if (nuevoEstado === 'Entregado') {
         if (this.db) {
           const stmtC = this.db.prepare('UPDATE Comandas SET Estado = "Entregado", HoraActualizacion = ? WHERE NTicket = ?');
-          stmtC.run([nowTime, targetTicket]);
+          stmtC.run([localTime, targetTicket]);
           stmtC.free();
         }
         const cIdx = this.fallbackComandas.findIndex((c) => c.NTicket === targetTicket);
         if (cIdx !== -1) {
           this.fallbackComandas[cIdx].Estado = 'Entregado';
-          this.fallbackComandas[cIdx].HoraActualizacion = nowTime;
+          this.fallbackComandas[cIdx].HoraActualizacion = localTime;
         }
       } else if (nuevoEstado === 'Cobrado') {
         const fp = item ? item.FormaPago : 'Efectivo';
         if (this.db) {
           const stmtC = this.db.prepare('UPDATE Comandas SET Estado = "Cobrado", FormaPago = ?, HoraActualizacion = ? WHERE NTicket = ?');
-          stmtC.run([fp, nowTime, targetTicket]);
+          stmtC.run([fp, localTime, targetTicket]);
           stmtC.free();
 
           const comanda = this.getComandaByTicket(targetTicket);
@@ -2130,7 +2168,7 @@ class SQLiteService {
         if (cIdx !== -1) {
           this.fallbackComandas[cIdx].Estado = 'Cobrado';
           this.fallbackComandas[cIdx].FormaPago = fp;
-          this.fallbackComandas[cIdx].HoraActualizacion = nowTime;
+          this.fallbackComandas[cIdx].HoraActualizacion = localTime;
           const exists = this.fallbackVentas.some((v) => v.NTicket === targetTicket);
           if (!exists) {
             this.fallbackVentas.push({
@@ -2149,13 +2187,13 @@ class SQLiteService {
           const stmtC = this.db.prepare(
             'UPDATE Comandas SET Estado = "Anulado", Notas = CASE WHEN Notas IS NULL OR Notas = "" THEN ? ELSE Notas || " | " || ? END, HoraActualizacion = ? WHERE NTicket = ?'
           );
-          stmtC.run([motivo, motivo, nowTime, targetTicket]);
+          stmtC.run([motivo, motivo, localTime, targetTicket]);
           stmtC.free();
         }
         const cIdx = this.fallbackComandas.findIndex((c) => c.NTicket === targetTicket);
         if (cIdx !== -1) {
           this.fallbackComandas[cIdx].Estado = 'Anulado';
-          this.fallbackComandas[cIdx].HoraActualizacion = nowTime;
+          this.fallbackComandas[cIdx].HoraActualizacion = localTime;
           this.fallbackComandas[cIdx].Notas = this.fallbackComandas[cIdx].Notas ? `${this.fallbackComandas[cIdx].Notas} | ${motivo}` : motivo;
         }
       }
@@ -2183,6 +2221,7 @@ class SQLiteService {
 
   /**
    * Converts a WhatsApp Order directly into an active Kitchen Comanda.
+   * Accurately sets local YYYY-MM-DD date and local HH:MM:SS time so the kitchen cooking timer starts at 00:00!
    */
   public convertWhatsAppPedidoToComanda(
     pedidoId: number
@@ -2238,9 +2277,16 @@ class SQLiteService {
         ? `Delivery: ${pedido.DireccionEntrega || 'A convenir'}`
         : `Para Llevar #${ticket}`;
 
+    const now = new Date();
+    const localYear = now.getFullYear();
+    const localMonth = String(now.getMonth() + 1).padStart(2, '0');
+    const localDay = String(now.getDate()).padStart(2, '0');
+    const dateStr = `${localYear}-${localMonth}-${localDay}`;
+    const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+
     const { comanda } = this.createComanda(
       {
-        Fecha: pedido.Fecha,
+        Fecha: dateStr,
         NTicket: ticket,
         Cliente: `${pedido.NombreCliente} (WA: ${pedido.TelefonoCliente})`,
         TipoServicio: pedido.TipoEntrega,
@@ -2249,17 +2295,301 @@ class SQLiteService {
         Monto: pedido.Total,
         FormaPago: pedido.FormaPago,
         Notas: `[WhatsApp] ${pedido.Notas ? pedido.Notas + ' | ' : ''}Tlf: ${pedido.TelefonoCliente}`,
-        HoraCreacion: pedido.FechaCreacion || new Date().toISOString().substring(11, 16),
+        HoraCreacion: timeStr,
       },
       cartItems
     );
 
-    // Update WhatsApp order to En Cocina
-    this.updatePedidoWhatsAppEstado(pedido.Id, 'En Cocina', ticket, comanda.ComandaId);
-    this.notify();
+    // Update WhatsApp order to En Cocina with exact ticket, comanda ID and local timestamps
+    if (this.db) {
+      try {
+        const stmt = this.db.prepare(
+          'UPDATE PedidosWhatsApp SET Estado = "En Cocina", NTicket = ?, ComandaId = ?, Fecha = ?, FechaCreacion = ? WHERE Id = ?'
+        );
+        stmt.run([ticket, comanda.ComandaId, dateStr, timeStr, pedido.Id]);
+        stmt.free();
+      } catch (e) {
+        console.error('convertWhatsAppPedidoToComanda db update error:', e);
+      }
+    }
 
+    const waItem = this.fallbackPedidosWhatsApp.find((p) => p.Id === pedido.Id);
+    if (waItem) {
+      waItem.Estado = 'En Cocina';
+      waItem.NTicket = ticket;
+      waItem.ComandaId = comanda.ComandaId;
+      waItem.Fecha = dateStr;
+      waItem.FechaCreacion = timeStr;
+    }
+
+    this.notify();
     return { comanda, nTicket: ticket };
   }
+
+  // ==========================================
+  // --- CIERRE DE CAJA / CIERRE DEL DÍA (REPORTE Z) ---
+  // ==========================================
+
+  public getCierreCajaStats(targetFecha?: string) {
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const fecha = targetFecha || todayStr;
+
+    // Get all sales for this date
+    const ventas = this.getVentas().filter((v) => v.Fecha.split(' ')[0] === fecha);
+    const totalVentas = Number(ventas.reduce((acc, v) => acc + safeParsePrice(v.Monto), 0).toFixed(2));
+    const totalPedidos = ventas.length;
+    const ticketPromedio = totalPedidos > 0 ? Number((totalVentas / totalPedidos).toFixed(2)) : 0;
+
+    // Breakdown by payment method
+    let totalEfectivo = 0;
+    let totalPagoMovil = 0;
+    let totalPuntoVenta = 0;
+    let totalTransferencia = 0;
+    let countEfectivo = 0;
+    let countPagoMovil = 0;
+    let countPuntoVenta = 0;
+    let countTransferencia = 0;
+
+    ventas.forEach((v) => {
+      const amt = safeParsePrice(v.Monto);
+      if (v.FormaPago === 'Efectivo') {
+        totalEfectivo += amt;
+        countEfectivo += 1;
+      } else if (v.FormaPago === 'Pago Movil') {
+        totalPagoMovil += amt;
+        countPagoMovil += 1;
+      } else if (v.FormaPago === 'Punto de Venta') {
+        totalPuntoVenta += amt;
+        countPuntoVenta += 1;
+      } else if (v.FormaPago === 'Transferencia') {
+        totalTransferencia += amt;
+        countTransferencia += 1;
+      } else {
+        totalEfectivo += amt;
+        countEfectivo += 1;
+      }
+    });
+
+    // Kitchen comandas stats for this date
+    const comandas = this.getComandas().filter((c) => c.Fecha.split(' ')[0] === fecha);
+    const comandasCocina = comandas.filter((c) => c.Estado === 'Cocina').length;
+    const comandasEntregado = comandas.filter((c) => c.Estado === 'Entregado').length;
+    const comandasCobrado = comandas.filter((c) => c.Estado === 'Cobrado').length;
+    const comandasAnulado = comandas.filter((c) => c.Estado === 'Anulado').length;
+
+    // WhatsApp orders stats for this date
+    const waOrders = this.getPedidosWhatsApp().filter((p) => p.Fecha.split(' ')[0] === fecha);
+    const waCount = waOrders.length;
+    const waDeliveryCount = waOrders.filter((p) => p.TipoEntrega === 'Delivery').length;
+    const waLlevarCount = waOrders.filter((p) => p.TipoEntrega === 'Para llevar').length;
+
+    return {
+      fecha,
+      totalVentas,
+      totalPedidos,
+      ticketPromedio,
+      totalEfectivo: Number(totalEfectivo.toFixed(2)),
+      totalPagoMovil: Number(totalPagoMovil.toFixed(2)),
+      totalPuntoVenta: Number(totalPuntoVenta.toFixed(2)),
+      totalTransferencia: Number(totalTransferencia.toFixed(2)),
+      countEfectivo,
+      countPagoMovil,
+      countPuntoVenta,
+      countTransferencia,
+      comandasStats: {
+        total: comandas.length,
+        cocina: comandasCocina,
+        entregado: comandasEntregado,
+        cobrado: comandasCobrado,
+        anulado: comandasAnulado,
+      },
+      waStats: {
+        total: waCount,
+        delivery: waDeliveryCount,
+        paraLlevar: waLlevarCount,
+      },
+      ventas,
+    };
+  }
+
+  public getCierresCaja(limit = 30): CierreCaja[] {
+    if (!this.db) {
+      return [...this.fallbackCierres].sort((a, b) => b.CierreId - a.CierreId).slice(0, limit);
+    }
+    try {
+      const res = this.db.exec(`SELECT * FROM CierresCaja ORDER BY CierreId DESC LIMIT ${limit}`);
+      if (res.length === 0 || !res[0].values) return [...this.fallbackCierres];
+      const cols = res[0].columns;
+      return res[0].values.map((row) => {
+        const item: any = {};
+        cols.forEach((c, idx) => { item[c] = row[idx]; });
+        return {
+          CierreId: Number(item.CierreId),
+          Fecha: String(item.Fecha),
+          Hora: String(item.Hora),
+          TotalVentas: safeParsePrice(item.TotalVentas),
+          TotalPedidos: Number(item.TotalPedidos),
+          TicketPromedio: safeParsePrice(item.TicketPromedio),
+          TotalEfectivo: safeParsePrice(item.TotalEfectivo),
+          TotalPagoMovil: safeParsePrice(item.TotalPagoMovil),
+          TotalPuntoVenta: safeParsePrice(item.TotalPuntoVenta),
+          TotalTransferencia: safeParsePrice(item.TotalTransferencia),
+          FondoInicial: safeParsePrice(item.FondoInicial),
+          EfectivoEsperado: safeParsePrice(item.EfectivoEsperado),
+          EfectivoContado: safeParsePrice(item.EfectivoContado),
+          Diferencia: safeParsePrice(item.Diferencia),
+          Cajero: String(item.Cajero),
+          Notas: item.Notas ? String(item.Notas) : undefined,
+          ArchivoGuardado: Boolean(item.ArchivoGuardado),
+        };
+      });
+    } catch (e) {
+      console.warn('getCierresCaja error:', e);
+      return [...this.fallbackCierres];
+    }
+  }
+
+  public getCierreCajaDelDia(fecha?: string): CierreCaja | null {
+    const list = this.getCierresCaja(100);
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const target = fecha || todayStr;
+    return list.find((c) => c.Fecha === target) || null;
+  }
+
+  public createCierreCaja(data: Omit<CierreCaja, 'CierreId'>): CierreCaja {
+    const cleanTotal = safeParsePrice(data.TotalVentas);
+    const cleanAvg = safeParsePrice(data.TicketPromedio);
+    const cleanEf = safeParsePrice(data.TotalEfectivo);
+    const cleanPm = safeParsePrice(data.TotalPagoMovil);
+    const cleanPv = safeParsePrice(data.TotalPuntoVenta);
+    const cleanTr = safeParsePrice(data.TotalTransferencia);
+    const cleanFondo = safeParsePrice(data.FondoInicial);
+    const cleanEsp = safeParsePrice(data.EfectivoEsperado);
+    const cleanCont = safeParsePrice(data.EfectivoContado);
+    const cleanDif = safeParsePrice(data.Diferencia);
+
+    if (this.db) {
+      try {
+        const stmt = this.db.prepare(
+          `INSERT INTO CierresCaja (Fecha, Hora, TotalVentas, TotalPedidos, TicketPromedio, TotalEfectivo, TotalPagoMovil, TotalPuntoVenta, TotalTransferencia, FondoInicial, EfectivoEsperado, EfectivoContado, Diferencia, Cajero, Notas, ArchivoGuardado) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        );
+        stmt.run([
+          data.Fecha,
+          data.Hora,
+          cleanTotal,
+          data.TotalPedidos,
+          cleanAvg,
+          cleanEf,
+          cleanPm,
+          cleanPv,
+          cleanTr,
+          cleanFondo,
+          cleanEsp,
+          cleanCont,
+          cleanDif,
+          data.Cajero,
+          data.Notas || '',
+          data.ArchivoGuardado ? 1 : 0,
+        ]);
+        stmt.free();
+
+        const lastIdRes = this.db.exec('SELECT last_insert_rowid()');
+        const newId = Number(lastIdRes[0].values[0][0]);
+        const created: CierreCaja = {
+          ...data,
+          CierreId: newId,
+        };
+        this.fallbackCierres.unshift(created);
+        this.notify();
+        this.uploadDatabaseToServer();
+        return created;
+      } catch (e) {
+        console.error('createCierreCaja db error:', e);
+      }
+    }
+
+    const nextId = this.fallbackCierres.length > 0 ? Math.max(...this.fallbackCierres.map((c) => c.CierreId)) + 1 : 1;
+    const created: CierreCaja = {
+      ...data,
+      CierreId: nextId,
+    };
+    this.fallbackCierres.unshift(created);
+    this.notify();
+    this.uploadDatabaseToServer();
+    return created;
+  }
+
+  /**
+   * Directly saves or writes the SQLite binary database to the user's PC:
+   * 1. Attempts File System Access API (showSaveFilePicker) so user can save/overwrite directly into TerrenoBroaster.db on their PC disk.
+   * 2. Automatically triggers browser download backup of TerrenoBroaster.db and TerrenoBroaster_Cierre_YYYY-MM-DD.db.
+   */
+  public async saveDatabaseToLocalPc(options?: {
+    customFilename?: string;
+    suggestDatedBackup?: boolean;
+    existingFileHandle?: any;
+  }): Promise<{ success: boolean; filename: string; sizeKb: number; method: 'native-file' | 'download' }> {
+    const binary = this.exportDatabase();
+    const sizeKb = Number((binary.byteLength / 1024).toFixed(1));
+    const now = new Date();
+    const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const defaultName = options?.customFilename || (options?.suggestDatedBackup ? `TerrenoBroaster_Cierre_${dateStr}.db` : 'TerrenoBroaster.db');
+
+    // Method 1: Web File System Access API (Supported in Chrome/Edge on Desktop PC)
+    if (typeof window !== 'undefined' && 'showSaveFilePicker' in window) {
+      try {
+        let handle = options?.existingFileHandle;
+        if (!handle) {
+          handle = await (window as any).showSaveFilePicker({
+            suggestedName: defaultName,
+            types: [
+              {
+                description: 'Base de Datos SQLite (.db)',
+                accept: {
+                  'application/x-sqlite3': ['.db', '.sqlite', '.sqlite3'],
+                },
+              },
+            ],
+          });
+        }
+
+        if (handle) {
+          const writable = await handle.createWritable();
+          await writable.write(binary);
+          await writable.close();
+
+          // Also trigger server upload
+          await this.uploadDatabaseToServer(binary);
+
+          return {
+            success: true,
+            filename: handle.name || defaultName,
+            sizeKb,
+            method: 'native-file',
+          };
+        }
+      } catch (err: any) {
+        if (err.name === 'AbortError') {
+          throw err;
+        }
+        console.warn('showSaveFilePicker failed, falling back to download:', err);
+      }
+    }
+
+    // Method 2: Direct browser download anchor
+    this.downloadDatabaseFile(defaultName);
+    await this.uploadDatabaseToServer(binary);
+
+    return {
+      success: true,
+      filename: defaultName,
+      sizeKb,
+      method: 'download',
+    };
+  }
+
 
   // ==========================================
   // --- SISTEMA DE INVENTARIO & MATERIA PRIMA ---
