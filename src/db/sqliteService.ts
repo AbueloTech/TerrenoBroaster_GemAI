@@ -13,6 +13,7 @@ import {
   AcumuladoFormaPago,
   DailySaleStat,
   Usuario,
+  UserRole,
   PedidoWhatsApp,
   EstadoPedidoWhatsApp,
   PedidoWhatsAppItem,
@@ -339,7 +340,8 @@ class SQLiteService {
         Plato TEXT NOT NULL,
         Precio REAL NOT NULL,
         Categoria TEXT NOT NULL,
-        Imagen TEXT
+        Imagen TEXT,
+        Descripcion TEXT
       );
     `);
 
@@ -516,6 +518,40 @@ class SQLiteService {
     } catch {
       // ignore
     }
+
+    // Schema self-healing: Ensure Descripcion column exists in Platos table
+    try {
+      const pragmaPlatos = this.db.exec("PRAGMA table_info(Platos);");
+      if (pragmaPlatos.length > 0 && pragmaPlatos[0].values) {
+        const colNames = pragmaPlatos[0].values.map((v: any) => String(v[1]).toLowerCase());
+        if (!colNames.includes('descripcion')) {
+          try {
+            this.db.run("ALTER TABLE Platos ADD COLUMN Descripcion TEXT;");
+          } catch {
+            // ignore
+          }
+        }
+      }
+
+      // Auto-populate appetizing Colombian Spanish descriptions for dishes with empty Descripcion
+      this.db.run(`
+        UPDATE Platos SET Descripcion = CASE
+          WHEN (Descripcion IS NULL OR TRIM(Descripcion) = '') AND LOWER(Plato) LIKE '%combo%familiar%' THEN '8 presas de pollo broaster crujiente, porción grande de papas a la francesa, 4 arepas, ensalada de la casa y salsas artesanales.'
+          WHEN (Descripcion IS NULL OR TRIM(Descripcion) = '') AND LOWER(Plato) LIKE '%combo%especial%' THEN '3 presas de pollo broaster crujiente, papas fritas crocantes, 2 arepas doraditas y variedad de salsas.'
+          WHEN (Descripcion IS NULL OR TRIM(Descripcion) = '') AND LOWER(Plato) LIKE '%combo%pareja%' THEN '4 presas de pollo broaster doradito, 2 porciones de papas, 2 arepitas y salsas especiales.'
+          WHEN (Descripcion IS NULL OR TRIM(Descripcion) = '') AND LOWER(Plato) LIKE '%broaster%' THEN 'Pollo broaster crocante y jugoso por dentro, preparado con nuestra receta tradicional y acompañado de papas y arepa.'
+          WHEN (Descripcion IS NULL OR TRIM(Descripcion) = '') AND LOWER(Plato) LIKE '%alita%' THEN 'Alitas crocantes marinadas en salsa BBQ o picante, acompañadas de papas a la francesa y aderezo ranch.'
+          WHEN (Descripcion IS NULL OR TRIM(Descripcion) = '') AND LOWER(Plato) LIKE '%hamburguesa%' THEN 'Carne 100% de res a la parrilla, queso derretido, lechuga fresca, tomate, cebolla caramelizada y salsa especial.'
+          WHEN (Descripcion IS NULL OR TRIM(Descripcion) = '') AND LOWER(Plato) LIKE '%salchipapa%' THEN 'Crocantes papas a la francesa con rodajas de salchicha premium, queso fundido y salsas al gusto.'
+          WHEN (Descripcion IS NULL OR TRIM(Descripcion) = '') AND (LOWER(Plato) LIKE '%gaseosa%' OR LOWER(Plato) LIKE '%coca%' OR LOWER(Plato) LIKE '%refresco%') THEN 'Bebida fría y refrescante en presentación personal o familiar para acompañar tu comida.'
+          WHEN (Descripcion IS NULL OR TRIM(Descripcion) = '') THEN 'Preparado artesanalmente con ingredientes frescos seleccionados y el auténtico sabor de Terreno Broaster.'
+          ELSE Descripcion
+        END
+        WHERE Descripcion IS NULL OR TRIM(Descripcion) = '';
+      `);
+    } catch {
+      // ignore
+    }
   }
 
   private seedAdminUserIfNotExist() {
@@ -679,7 +715,7 @@ class SQLiteService {
       return [...this.fallbackPlatos];
     }
     try {
-      const res = this.db.exec('SELECT ID, Plato, Precio, Categoria, Imagen FROM Platos ORDER BY ID ASC');
+      const res = this.db.exec('SELECT ID, Plato, Precio, Categoria, Imagen, Descripcion FROM Platos ORDER BY ID ASC');
       if (res.length === 0) return [...this.fallbackPlatos];
       const columns = res[0].columns;
       return res[0].values.map((row) => {
@@ -693,6 +729,7 @@ class SQLiteService {
           Precio: safeParsePrice(item.Precio),
           Categoria: String(item.Categoria),
           Imagen: String(item.Imagen || ''),
+          Descripcion: item.Descripcion ? String(item.Descripcion) : '',
         };
       });
     } catch (e) {
@@ -703,21 +740,22 @@ class SQLiteService {
 
   public addPlato(plato: Omit<Plato, 'ID'>): Plato {
     const cleanPrice = safeParsePrice(plato.Precio);
+    const desc = plato.Descripcion || '';
 
     let created: Plato;
     if (this.db) {
-      const stmt = this.db.prepare('INSERT INTO Platos (Plato, Precio, Categoria, Imagen) VALUES (?, ?, ?, ?)');
-      stmt.run([plato.Plato, cleanPrice, plato.Categoria, plato.Imagen || '']);
+      const stmt = this.db.prepare('INSERT INTO Platos (Plato, Precio, Categoria, Imagen, Descripcion) VALUES (?, ?, ?, ?, ?)');
+      stmt.run([plato.Plato, cleanPrice, plato.Categoria, plato.Imagen || '', desc]);
       stmt.free();
 
       const lastIdRes = this.db.exec('SELECT last_insert_rowid()');
       const newId = Number(lastIdRes[0].values[0][0]);
       
-      created = { ID: newId, Plato: plato.Plato, Precio: cleanPrice, Categoria: plato.Categoria, Imagen: plato.Imagen };
+      created = { ID: newId, Plato: plato.Plato, Precio: cleanPrice, Categoria: plato.Categoria, Imagen: plato.Imagen, Descripcion: desc };
       this.fallbackPlatos.push(created);
     } else {
       const newId = this.fallbackPlatos.length > 0 ? Math.max(...this.fallbackPlatos.map((p) => p.ID)) + 1 : 1;
-      created = { ID: newId, Plato: plato.Plato, Precio: cleanPrice, Categoria: plato.Categoria, Imagen: plato.Imagen };
+      created = { ID: newId, Plato: plato.Plato, Precio: cleanPrice, Categoria: plato.Categoria, Imagen: plato.Imagen, Descripcion: desc };
       this.fallbackPlatos.push(created);
     }
     this.notify();
@@ -727,16 +765,17 @@ class SQLiteService {
 
   public updatePlato(plato: Plato): boolean {
     const cleanPrice = safeParsePrice(plato.Precio);
+    const desc = plato.Descripcion || '';
 
     if (this.db) {
-      const stmt = this.db.prepare('UPDATE Platos SET Plato = ?, Precio = ?, Categoria = ?, Imagen = ? WHERE ID = ?');
-      stmt.run([plato.Plato, cleanPrice, plato.Categoria, plato.Imagen || '', plato.ID]);
+      const stmt = this.db.prepare('UPDATE Platos SET Plato = ?, Precio = ?, Categoria = ?, Imagen = ?, Descripcion = ? WHERE ID = ?');
+      stmt.run([plato.Plato, cleanPrice, plato.Categoria, plato.Imagen || '', desc, plato.ID]);
       stmt.free();
     }
     
     const idx = this.fallbackPlatos.findIndex((p) => p.ID === plato.ID);
     if (idx !== -1) {
-      this.fallbackPlatos[idx] = { ...plato, Precio: cleanPrice };
+      this.fallbackPlatos[idx] = { ...plato, Precio: cleanPrice, Descripcion: desc };
     }
     this.notify();
     this.uploadDatabaseToServer();
@@ -1825,7 +1864,7 @@ class SQLiteService {
   public createOrUpdateUsuario(
     username: string,
     password: string,
-    role: 'Administrador' | 'Cajero' | 'Supervisor' = 'Administrador'
+    role: UserRole = 'Administrador'
   ): { success: boolean; error?: string; user?: Usuario } {
     const cleanUser = username.trim();
     const cleanPass = password.trim();

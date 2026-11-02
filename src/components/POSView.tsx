@@ -572,9 +572,16 @@ export const POSView: React.FC<POSViewProps> = ({
 
                     {/* Content */}
                     <div className="p-3 flex-1 flex flex-col justify-between">
-                      <h4 className="text-stone-100 font-semibold text-xs sm:text-sm line-clamp-2 leading-snug group-hover:text-amber-400 transition-colors">
-                        {plato.Plato}
-                      </h4>
+                      <div>
+                        <h4 className="text-stone-100 font-semibold text-xs sm:text-sm line-clamp-2 leading-snug group-hover:text-amber-400 transition-colors">
+                          {plato.Plato}
+                        </h4>
+                        {plato.Descripcion && (
+                          <p className="text-[11px] text-stone-400 line-clamp-2 mt-1 leading-tight">
+                            {plato.Descripcion}
+                          </p>
+                        )}
+                      </div>
 
                       <div className="mt-3 flex items-center justify-between pt-2 border-t border-stone-800/80">
                         <span className="text-amber-400 font-black text-sm sm:text-base font-mono">

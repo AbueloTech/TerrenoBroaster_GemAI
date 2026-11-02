@@ -397,6 +397,11 @@ export const CustomerMenuView: React.FC<CustomerMenuViewProps> = ({
                       <h4 className="font-bold text-sm text-white group-hover:text-amber-400 transition-colors leading-snug">
                         {plato.Plato}
                       </h4>
+                      {plato.Descripcion && (
+                        <p className="text-xs text-stone-300/90 mt-1.5 leading-relaxed line-clamp-3 bg-stone-950/60 p-2 rounded-xl border border-stone-800/60">
+                          {plato.Descripcion}
+                        </p>
+                      )}
                     </div>
 
                     <div className="flex items-center justify-between pt-2 border-t border-stone-800/80">

@@ -60,11 +60,13 @@ export const PlatosView: React.FC<PlatosViewProps> = ({ platos, onRefresh, onOpe
     Precio: string;
     Categoria: string;
     Imagen: string;
+    Descripcion: string;
   }>({
     Plato: '',
     Precio: '',
     Categoria: 'Pollo',
     Imagen: '',
+    Descripcion: '',
   });
 
   const [isCreatingNewCategory, setIsCreatingNewCategory] = useState(false);
@@ -76,7 +78,8 @@ export const PlatosView: React.FC<PlatosViewProps> = ({ platos, onRefresh, onOpe
     const matchesSearch =
       p.Plato.toLowerCase().includes(searchTerm.toLowerCase()) ||
       p.Categoria.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.Imagen.toLowerCase().includes(searchTerm.toLowerCase());
+      p.Imagen.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (p.Descripcion && p.Descripcion.toLowerCase().includes(searchTerm.toLowerCase()));
     return matchesCat && matchesSearch;
   });
 
@@ -88,6 +91,7 @@ export const PlatosView: React.FC<PlatosViewProps> = ({ platos, onRefresh, onOpe
       Precio: '',
       Categoria: defaultCat,
       Imagen: '',
+      Descripcion: '',
     });
     setIsCreatingNewCategory(false);
     setNewCategoryName('');
@@ -102,6 +106,7 @@ export const PlatosView: React.FC<PlatosViewProps> = ({ platos, onRefresh, onOpe
       Precio: plato.Precio.toString(),
       Categoria: plato.Categoria,
       Imagen: plato.Imagen,
+      Descripcion: plato.Descripcion || '',
     });
     setIsCreatingNewCategory(false);
     setNewCategoryName('');
@@ -135,6 +140,7 @@ export const PlatosView: React.FC<PlatosViewProps> = ({ platos, onRefresh, onOpe
           Precio: precioNum,
           Categoria: finalCategory,
           Imagen: formData.Imagen.trim(),
+          Descripcion: formData.Descripcion.trim(),
         });
       } else {
         sqliteService.addPlato({
@@ -142,6 +148,7 @@ export const PlatosView: React.FC<PlatosViewProps> = ({ platos, onRefresh, onOpe
           Precio: precioNum,
           Categoria: finalCategory,
           Imagen: formData.Imagen.trim(),
+          Descripcion: formData.Descripcion.trim(),
         });
       }
 
@@ -328,7 +335,14 @@ export const PlatosView: React.FC<PlatosViewProps> = ({ platos, onRefresh, onOpe
                           }}
                         />
                       </td>
-                      <td className="py-3 px-4 font-semibold text-stone-100 max-w-xs">{plato.Plato}</td>
+                      <td className="py-3 px-4 font-semibold text-stone-100 max-w-xs">
+                        <div>{plato.Plato}</div>
+                        {plato.Descripcion && (
+                          <div className="text-[11px] text-stone-400 font-normal line-clamp-2 mt-0.5">
+                            {plato.Descripcion}
+                          </div>
+                        )}
+                      </td>
                       <td className="py-3 px-4">
                         <span className="px-2.5 py-1 rounded-md text-[10px] font-bold bg-stone-800 text-amber-400 border border-stone-700/60 uppercase">
                           {plato.Categoria}
@@ -400,7 +414,14 @@ export const PlatosView: React.FC<PlatosViewProps> = ({ platos, onRefresh, onOpe
                 <div className="p-4 flex-1 flex flex-col justify-between">
                   <div>
                     <h4 className="font-semibold text-stone-100 text-sm">{plato.Plato}</h4>
-                    <p className="text-[11px] font-mono text-stone-400 mt-1">Archivo: {plato.Imagen || 'N/A'}</p>
+                    {plato.Descripcion ? (
+                      <p className="text-xs text-stone-300/90 mt-1 line-clamp-2 leading-snug">
+                        {plato.Descripcion}
+                      </p>
+                    ) : (
+                      <p className="text-[11px] text-stone-500 italic mt-1">Sin descripción ingresada</p>
+                    )}
+                    <p className="text-[10px] font-mono text-stone-500 mt-2">Archivo: {plato.Imagen || 'N/A'}</p>
                   </div>
 
                   <div className="mt-4 pt-3 border-t border-stone-800 flex justify-end space-x-2">
@@ -454,6 +475,23 @@ export const PlatosView: React.FC<PlatosViewProps> = ({ platos, onRefresh, onOpe
                   placeholder="Ej: Combo Broaster Especial 3 Piezas"
                   className="w-full py-2.5 px-3 bg-stone-950 border border-stone-700 rounded-xl text-stone-100 focus:outline-none focus:border-amber-500"
                 />
+              </div>
+
+              {/* Descripcion y Contenido del Plato */}
+              <div>
+                <label className="block text-stone-300 font-semibold mb-1">
+                  Descripción y Contenido del Plato:
+                </label>
+                <textarea
+                  rows={2}
+                  value={formData.Descripcion}
+                  onChange={(e) => setFormData({ ...formData, Descripcion: e.target.value })}
+                  placeholder="Ej: 3 presas de pollo crujiente, papas a la francesa, 2 arepitas y salsas de la casa."
+                  className="w-full py-2 px-3 bg-stone-950 border border-stone-700 rounded-xl text-stone-100 placeholder:text-stone-600 focus:outline-none focus:border-amber-500 text-xs"
+                />
+                <p className="text-[10px] text-stone-400 mt-0.5">
+                  Esta descripción informa a los clientes en el menú digital sobre los ingredientes y acompañamientos.
+                </p>
               </div>
 
               {/* Precio y Categoria en 2 cols */}

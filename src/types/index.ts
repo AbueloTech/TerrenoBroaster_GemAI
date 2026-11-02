@@ -24,6 +24,7 @@ export interface Plato {
   Precio: number;
   Categoria: string;
   Imagen: string; // e.g. "broaster_combo2.jpg"
+  Descripcion?: string;
 }
 
 export interface Venta {

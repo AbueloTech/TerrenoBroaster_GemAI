@@ -26,7 +26,7 @@ import { menuSyncService } from './services/menuSyncService';
 import { playWhatsAppIncomingAlert, playNotificationSound } from './utils/soundAlert';
 import { formatCurrency } from './utils/currency';
 import { safeStorage } from './utils/safeStorage';
-import { MessageSquare, Bell, ArrowRight, X, Truck, Package, Volume2, Settings } from 'lucide-react';
+import { MessageSquare, Bell, ArrowRight, X, Truck, Package, Volume2, Settings, ShieldAlert } from 'lucide-react';
 
 interface IncomingWhatsAppAlert {
   id: number;
@@ -82,7 +82,7 @@ export default function App() {
   const isInitialLoadRef = useRef<boolean>(true);
 
   // Splash & User Authentication State
-  const [showSplash, setShowSplash] = useState<boolean>(false);
+  const [showSplash, setShowSplash] = useState<boolean>(true);
   const [currentUser, setCurrentUser] = useState<Usuario | null>(() => {
     try {
       const saved = safeStorage.getItem('tb_logged_user');
@@ -101,6 +101,11 @@ export default function App() {
     }
   });
   const [isLoginModalOpen, setIsLoginModalOpen] = useState<boolean>(false);
+  const [restrictedNotice, setRestrictedNotice] = useState<{
+    title: string;
+    message: string;
+    requiredRole: string;
+  } | null>(null);
 
   // Preselected table location when jumping from Comandas/Mesas map to POS
   const [posPreselectedTipo, setPosPreselectedTipo] = useState<TipoServicio | undefined>(undefined);
@@ -306,21 +311,84 @@ export default function App() {
 
   const handleSplashFinish = () => {
     setShowSplash(false);
-    if (!currentUser) {
-      setIsLoginModalOpen(true);
-    }
+    setIsLoginModalOpen(true);
   };
 
   const handleLoginSuccess = (user: Usuario) => {
     setCurrentUser(user);
     safeStorage.setItem('tb_logged_user', JSON.stringify(user));
     setIsLoginModalOpen(false);
+    if (user.Role === 'Cocinero') {
+      setCurrentTab('comandas');
+    }
   };
 
   const handleLogout = () => {
     setCurrentUser(null);
     safeStorage.removeItem('tb_logged_user');
     setIsLoginModalOpen(true);
+  };
+
+  const handleTabChange = (tab: NavTab) => {
+    const role = currentUser?.Role || 'Administrador';
+
+    // 1. Cocinero can only access the Kitchen Display System (KDS)
+    if (role === 'Cocinero' && tab !== 'comandas') {
+      setRestrictedNotice({
+        title: 'Área Restringida para Cocinero',
+        message: 'Tu perfil es Cocinero (KDS). Tu módulo asignado es el Monitor de Cocina para el despacho de pedidos y comandas.',
+        requiredRole: 'Administrador o Cajero',
+      });
+      return;
+    }
+
+    // 2. Mesero can only access POS and comandas (to place table orders and check dish readiness)
+    if (role === 'Mesero' && tab !== 'pos' && tab !== 'comandas') {
+      setRestrictedNotice({
+        title: 'Área Restringida para Mesero',
+        message: 'El perfil Mesero tiene acceso a Toma de Pedidos (POS) y visualización del estado de Comandas. Para modificar la Carta, Inventarios o Métricas Financieras, inicia sesión como Administrador.',
+        requiredRole: 'Administrador',
+      });
+      return;
+    }
+
+    // 3. Cajero can access POS, comandas, historial. Cannot modify dishes or inventory
+    if (role === 'Cajero' && (tab === 'platos' || tab === 'inventario' || tab === 'dashboard')) {
+      setRestrictedNotice({
+        title: 'Módulo Administrativo Restringido',
+        message: 'La administración de la Carta de Platos, Control de Costos/Inventario y Métricas Generales requiere privilegios de Administrador.',
+        requiredRole: 'Administrador',
+      });
+      return;
+    }
+
+    setCurrentTab(tab);
+  };
+
+  const handleOpenCierreCaja = () => {
+    const role = currentUser?.Role || 'Administrador';
+    if (role === 'Cocinero' || role === 'Mesero') {
+      setRestrictedNotice({
+        title: 'Arqueo de Caja Restringido',
+        message: 'El Arqueo y Cierre de Caja del día en Pesos Colombianos (COP) solo puede ser realizado por el Cajero o el Administrador.',
+        requiredRole: 'Cajero o Administrador',
+      });
+      return;
+    }
+    setIsCierreCajaModalOpen(true);
+  };
+
+  const handleOpenDbModal = () => {
+    const role = currentUser?.Role || 'Administrador';
+    if (role !== 'Administrador') {
+      setRestrictedNotice({
+        title: 'Base de Datos Restringida',
+        message: 'La exportación, importación y mantenimiento de la base de datos SQLite TerrenoBroaster.db está reservada exclusivamente para el Administrador.',
+        requiredRole: 'Administrador',
+      });
+      return;
+    }
+    setIsDbModalOpen(true);
   };
 
   const cartTotalItems = cart.reduce((sum, item) => sum + item.cantidad, 0);
@@ -351,12 +419,12 @@ export default function App() {
       {/* Top Main Navigation Bar */}
       <Navbar
         currentTab={currentTab}
-        onTabChange={setCurrentTab}
+        onTabChange={handleTabChange}
         onToggleSidebar={handleToggleSidebar}
         isSidebarExpanded={isSidebarExpanded}
         onOpenQrModal={() => setIsDirectQrModalOpen(true)}
         onOpenWhatsAppModal={() => setIsWhatsAppModalOpen(true)}
-        onOpenCierreCajaModal={() => setIsCierreCajaModalOpen(true)}
+        onOpenCierreCajaModal={handleOpenCierreCaja}
         onOpenLoginModal={() => setIsLoginModalOpen(true)}
         onLogout={handleLogout}
         currentUser={currentUser}
@@ -368,7 +436,7 @@ export default function App() {
       <div className="flex-1 flex overflow-hidden relative">
         <Sidebar
           currentTab={currentTab}
-          onTabChange={setCurrentTab}
+          onTabChange={handleTabChange}
           isExpanded={isSidebarExpanded}
           onToggleExpanded={() => {
             setIsSidebarExpanded((prev) => {
@@ -379,11 +447,11 @@ export default function App() {
           }}
           isMobileOpen={isMobileSidebarOpen}
           onCloseMobile={() => setIsMobileSidebarOpen(false)}
-          onOpenDbModal={() => setIsDbModalOpen(true)}
+          onOpenDbModal={handleOpenDbModal}
           onOpenGithubModal={() => setIsGithubModalOpen(true)}
           onOpenImageModal={() => setIsImageModalOpen(true)}
           onOpenWhatsAppModal={() => setIsWhatsAppModalOpen(true)}
-          onOpenCierreCajaModal={() => setIsCierreCajaModalOpen(true)}
+          onOpenCierreCajaModal={handleOpenCierreCaja}
           onOpenAlertSettingsModal={() => setIsAlertSettingsModalOpen(true)}
           onOpenCustomerMenu={() => window.open('/cliente', '_blank')}
           onOpenQrModal={() => setIsDirectQrModalOpen(true)}
@@ -605,11 +673,11 @@ export default function App() {
         </div>
       </div>
 
-      {/* Splash Screen (Animated 30s entrance or on demand) */}
+      {/* Splash Screen (Animated 15s entrance or on demand) */}
       {showSplash && (
         <SplashScreen
           onFinish={handleSplashFinish}
-          defaultDurationSeconds={30}
+          defaultDurationSeconds={15}
         />
       )}
 
@@ -694,6 +762,44 @@ export default function App() {
         onClose={() => setIsCierreCajaModalOpen(false)}
         currentUser={currentUser}
       />
+
+      {/* Role Restriction Alert Modal */}
+      {restrictedNotice && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-stone-900 border border-stone-800 rounded-3xl max-w-md w-full p-6 text-center space-y-4 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="w-16 h-16 mx-auto rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
+              <ShieldAlert className="w-8 h-8" />
+            </div>
+            <div>
+              <h3 className="text-lg font-black text-white">{restrictedNotice.title}</h3>
+              <p className="text-xs text-stone-400 mt-2 leading-relaxed">
+                {restrictedNotice.message}
+              </p>
+            </div>
+            <div className="bg-stone-950 p-3 rounded-2xl border border-stone-800 flex items-center justify-between text-xs">
+              <span className="text-stone-400">Tu rol actual:</span>
+              <span className="font-bold text-amber-400">{currentUser?.Role || 'Sin Rol'}</span>
+            </div>
+            <div className="pt-2 flex flex-col gap-2">
+              <button
+                onClick={() => {
+                  setRestrictedNotice(null);
+                  setIsLoginModalOpen(true);
+                }}
+                className="w-full py-3 bg-amber-500 hover:bg-amber-400 text-stone-950 font-black rounded-xl text-xs transition-colors shadow-lg shadow-amber-500/20 cursor-pointer"
+              >
+                Cambiar de Usuario / Iniciar Sesión
+              </button>
+              <button
+                onClick={() => setRestrictedNotice(null)}
+                className="w-full py-2.5 bg-stone-800 hover:bg-stone-700 text-stone-300 font-semibold rounded-xl text-xs transition-colors"
+              >
+                Entendido
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

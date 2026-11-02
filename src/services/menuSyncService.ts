@@ -23,8 +23,8 @@ class MenuSyncService {
   public async pushMenuToServer(platos: Plato[], restaurantPhone: string, force = false): Promise<boolean> {
     if (!Array.isArray(platos) || platos.length === 0) return false;
 
-    // Build signature representing all dishes (IDs, names, prices, categories, images) and phone
-    const signature = `${platos.length}|` + platos.map((p) => `${p.ID}:${p.Plato}:${p.Precio}:${p.Categoria || ''}:${p.Imagen || ''}`).join(';') + `|${restaurantPhone}`;
+    // Build signature representing all dishes (IDs, names, prices, categories, images, descriptions) and phone
+    const signature = `${platos.length}|` + platos.map((p) => `${p.ID}:${p.Plato}:${p.Precio}:${p.Categoria || ''}:${p.Imagen || ''}:${p.Descripcion || ''}`).join(';') + `|${restaurantPhone}`;
     if (!force && signature === this.lastPushedJson && !this.isPushing) {
       return true;
     }
@@ -148,6 +148,7 @@ class MenuSyncService {
         p.Precio,
         p.Categoria || '',
         p.Imagen || '',
+        p.Descripcion || '',
       ]);
       const jsonStr = JSON.stringify(compact);
       return btoa(unescape(encodeURIComponent(jsonStr)));
@@ -173,6 +174,7 @@ class MenuSyncService {
           Precio: Number(item[2] || 0),
           Categoria: String(item[3] || 'General'),
           Imagen: item[4] ? String(item[4]) : '',
+          Descripcion: item[5] ? String(item[5]) : '',
         }));
       }
       return null;
