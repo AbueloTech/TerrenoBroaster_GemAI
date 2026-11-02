@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Lock,
   User,
@@ -6,21 +6,16 @@ import {
   Eye,
   EyeOff,
   ShieldCheck,
-  Flame,
   CheckCircle2,
   AlertCircle,
   UserPlus,
   LogIn,
-  Sparkles,
   RefreshCw,
   X,
-  ChefHat,
-  Calculator,
-  UtensilsCrossed,
-  ShieldAlert,
-  ArrowRight,
   Crown,
-  Layers,
+  Calculator,
+  ChefHat,
+  UtensilsCrossed,
 } from 'lucide-react';
 import { sqliteService } from '../db/sqliteService';
 import { Usuario, UserRole } from '../types';
@@ -32,57 +27,42 @@ interface LoginModalProps {
   canDismiss?: boolean;
 }
 
-interface QuickRolePreset {
-  role: UserRole;
+interface AccountHint {
   username: string;
+  role: UserRole;
   label: string;
-  description: string;
   icon: React.ComponentType<{ className?: string }>;
   colorClass: string;
-  bgClass: string;
-  borderClass: string;
 }
 
-const QUICK_ROLES: QuickRolePreset[] = [
+const DEFAULT_ACCOUNTS: AccountHint[] = [
   {
-    role: 'Administrador',
     username: 'admin',
+    role: 'Administrador',
     label: 'Administrador',
-    description: 'Acceso Total: POS, Cocina, Platos, Inventario, Cierre Z y Base de Datos',
     icon: Crown,
-    colorClass: 'text-amber-400',
-    bgClass: 'bg-amber-950/40 hover:bg-amber-950/70',
-    borderClass: 'border-amber-500/40 hover:border-amber-400',
+    colorClass: 'text-amber-400 border-amber-500/40 bg-amber-500/10',
   },
   {
-    role: 'Cajero',
     username: 'cajero',
+    role: 'Cajero',
     label: 'Cajero',
-    description: 'Punto de Venta (POS), Historial de Ventas, Cierre de Caja COP y WhatsApp',
     icon: Calculator,
-    colorClass: 'text-emerald-400',
-    bgClass: 'bg-emerald-950/40 hover:bg-emerald-950/70',
-    borderClass: 'border-emerald-500/40 hover:border-emerald-400',
+    colorClass: 'text-emerald-400 border-emerald-500/40 bg-emerald-500/10',
   },
   {
-    role: 'Cocinero',
     username: 'cocina',
-    label: 'Cocinero (KDS)',
-    description: 'Monitor de Comandas en Cocina y control de tiempos de preparación',
+    role: 'Cocinero',
+    label: 'Cocina (KDS)',
     icon: ChefHat,
-    colorClass: 'text-orange-400',
-    bgClass: 'bg-orange-950/40 hover:bg-orange-950/70',
-    borderClass: 'border-orange-500/40 hover:border-orange-400',
+    colorClass: 'text-orange-400 border-orange-500/40 bg-orange-500/10',
   },
   {
-    role: 'Mesero',
     username: 'mesero',
+    role: 'Mesero',
     label: 'Mesero',
-    description: 'Toma de pedidos en mesas (POS) y visualización de platos listos',
     icon: UtensilsCrossed,
-    colorClass: 'text-sky-400',
-    bgClass: 'bg-sky-950/40 hover:bg-sky-950/70',
-    borderClass: 'border-sky-500/40 hover:border-sky-400',
+    colorClass: 'text-sky-400 border-sky-500/40 bg-sky-500/10',
   },
 ];
 
@@ -92,7 +72,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   onCancel,
   canDismiss = true,
 }) => {
-  const [activeTab, setActiveTab] = useState<'quick' | 'credentials' | 'register'>('quick');
+  const [activeTab, setActiveTab] = useState<'login' | 'register'>('login');
 
   // Form states
   const [username, setUsername] = useState('');
@@ -106,7 +86,9 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Available users list for quick selection
+  const passwordInputRef = useRef<HTMLInputElement>(null);
+
+  // Available users list from SQLite
   const [registeredUsers, setRegisteredUsers] = useState<Usuario[]>([]);
 
   useEffect(() => {
@@ -115,67 +97,57 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       setRegisteredUsers(users);
       setErrorMessage(null);
       setSuccessMessage(null);
+      setPassword('');
     }
   }, [isOpen]);
 
   if (!isOpen) return null;
 
-  // Handle Quick Role Click (Sin Complicaciones)
-  const handleQuickLogin = (preset: QuickRolePreset) => {
-    setIsSubmitting(true);
+  // Select an account hint: Fills the username and focuses password field (Password is REQUIRED!)
+  const handleSelectAccountHint = (account: AccountHint) => {
+    setUsername(account.username);
+    setPassword('');
     setErrorMessage(null);
-
-    // Try finding registered user for this role or use preset credentials
-    const pass = `${preset.username}123`;
-    const result = sqliteService.validateUsuario(preset.username, pass);
-
+    setSuccessMessage(null);
     setTimeout(() => {
-      setIsSubmitting(false);
-      if (result.success && result.user) {
-        setSuccessMessage(`¡Acceso concedido como ${result.user.Role}: ${result.user.Username}!`);
-        setTimeout(() => {
-          onLoginSuccess(result.user!);
-        }, 350);
-      } else {
-        // Fallback create/login
-        const fallbackUser: Usuario = {
-          Id: Math.floor(Math.random() * 1000),
-          Username: preset.username,
-          Role: preset.role,
-        };
-        sqliteService.createOrUpdateUsuario(preset.username, pass, preset.role);
-        setSuccessMessage(`¡Bienvenido! Entrando como ${preset.role}`);
-        setTimeout(() => {
-          onLoginSuccess(fallbackUser);
-        }, 350);
-      }
-    }, 250);
+      passwordInputRef.current?.focus();
+    }, 50);
   };
 
-  // Handle Standard Login submission
+  // Handle Standard Login submission (STRICT: Password required & verified via SQLite)
   const handleCredentialsSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
+    setSuccessMessage(null);
 
-    if (!username.trim() || !password.trim()) {
-      setErrorMessage('Por favor ingrese su usuario y contraseña.');
+    const cleanUser = username.trim();
+    const cleanPass = password.trim();
+
+    if (!cleanUser) {
+      setErrorMessage('Por favor ingrese su nombre de usuario.');
+      return;
+    }
+    if (!cleanPass) {
+      setErrorMessage('Por favor ingrese su contraseña para validar su identidad.');
       return;
     }
 
     setIsSubmitting(true);
-    const result = sqliteService.validateUsuario(username, password);
+    const result = sqliteService.validateUsuario(cleanUser, cleanPass);
 
     setTimeout(() => {
       setIsSubmitting(false);
       if (result.success && result.user) {
-        setSuccessMessage(`¡Bienvenido de nuevo, ${result.user.Username} (${result.user.Role})!`);
+        setSuccessMessage(`¡Acceso verificado! Bienvenido ${result.user.Username} (${result.user.Role})`);
         setTimeout(() => {
           onLoginSuccess(result.user!);
-        }, 400);
+        }, 350);
       } else {
-        setErrorMessage(result.error || 'Credenciales inválidas. Verifique su usuario o contraseña.');
+        setErrorMessage(
+          result.error || 'Credenciales incorrectas. Verifique su usuario y contraseña.'
+        );
       }
-    }, 300);
+    }, 250);
   };
 
   // Handle Register / New User submission
@@ -207,7 +179,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     setTimeout(() => {
       setIsSubmitting(false);
       if (result.success && result.user) {
-        setSuccessMessage(`¡Usuario "${result.user.Username}" guardado en TerrenoBroaster.db!`);
+        setSuccessMessage(`¡Usuario "${result.user.Username}" guardado con éxito en TerrenoBroaster.db!`);
         setRegisteredUsers(sqliteService.getUsuarios());
         setTimeout(() => {
           onLoginSuccess(result.user!);
@@ -215,12 +187,12 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       } else {
         setErrorMessage(result.error || 'No se pudo guardar el usuario en la base de datos.');
       }
-    }, 350);
+    }, 300);
   };
 
   return (
     <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 select-none animate-in fade-in duration-200">
-      <div className="bg-stone-900 border border-stone-800 rounded-3xl max-w-lg w-full shadow-2xl overflow-hidden flex flex-col transition-all">
+      <div className="bg-stone-900 border border-stone-800 rounded-3xl max-w-md w-full shadow-2xl overflow-hidden flex flex-col transition-all">
         
         {/* Header with Circular Logo and Title */}
         <div className="p-5 sm:p-6 bg-gradient-to-b from-stone-950 via-stone-900 to-stone-900 border-b border-stone-800 text-center relative">
@@ -229,7 +201,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             <button
               type="button"
               onClick={onCancel}
-              className="absolute top-4 right-4 p-2 rounded-xl text-stone-400 hover:text-white hover:bg-stone-800 transition-colors cursor-pointer"
+              className="absolute top-4 right-4 p-2 rounded-xl text-stone-400 hover:text-stone-100 hover:bg-stone-800 transition-colors cursor-pointer"
               title="Cerrar ventana"
             >
               <X className="w-5 h-5" />
@@ -237,10 +209,10 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           )}
 
           {/* Glowing Circular Restaurant Logo */}
-          <div className="relative w-20 h-20 mx-auto mb-3 flex items-center justify-center">
+          <div className="relative w-16 h-16 mx-auto mb-3 flex items-center justify-center">
             <div className="absolute inset-0 rounded-full bg-amber-500/20 blur-xl animate-pulse" />
             <div className="absolute -inset-0.5 rounded-full border border-amber-400/60 animate-[spin_8s_linear_infinite]" />
-            <div className="w-18 h-18 rounded-full overflow-hidden border-2 border-amber-400 shadow-xl shadow-amber-500/25 bg-stone-950 p-0.5">
+            <div className="w-14 h-14 rounded-full overflow-hidden border-2 border-amber-400 shadow-xl shadow-amber-500/25 bg-stone-950 p-0.5">
               <img
                 src="/pollobroaster.jpg"
                 alt="Logo Terreno Broaster"
@@ -258,43 +230,26 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             TERRENO <span className="bg-gradient-to-r from-amber-400 to-orange-400 bg-clip-text text-transparent">BROASTER</span>
           </h2>
           <p className="text-xs text-stone-400 mt-0.5 font-medium">
-            Control de Acceso • Sistema de Privilegios por Área
+            Control de Acceso Seguro • Autenticación de Personal
           </p>
 
-          {/* Navigation Tabs */}
+          {/* Navigation Tabs (Strict Login vs User Registration) */}
           <div className="mt-4 flex bg-stone-950 p-1 rounded-xl border border-stone-800 text-xs font-bold">
             <button
               type="button"
               onClick={() => {
-                setActiveTab('quick');
+                setActiveTab('login');
                 setErrorMessage(null);
                 setSuccessMessage(null);
               }}
-              className={`flex-1 py-1.5 rounded-lg flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
-                activeTab === 'quick'
+              className={`flex-1 py-2 rounded-lg flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
+                activeTab === 'login'
                   ? 'bg-amber-500 text-stone-950 shadow-sm'
-                  : 'text-stone-400 hover:text-white'
-              }`}
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>Acceso Rápido</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setActiveTab('credentials');
-                setErrorMessage(null);
-                setSuccessMessage(null);
-              }}
-              className={`flex-1 py-1.5 rounded-lg flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
-                activeTab === 'credentials'
-                  ? 'bg-amber-500 text-stone-950 shadow-sm'
-                  : 'text-stone-400 hover:text-white'
+                  : 'text-stone-400 hover:text-stone-100'
               }`}
             >
               <KeyRound className="w-3.5 h-3.5" />
-              <span>Con Contraseña</span>
+              <span>Iniciar Sesión</span>
             </button>
 
             <button
@@ -304,14 +259,14 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 setErrorMessage(null);
                 setSuccessMessage(null);
               }}
-              className={`flex-1 py-1.5 rounded-lg flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
+              className={`flex-1 py-2 rounded-lg flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
                 activeTab === 'register'
                   ? 'bg-amber-500 text-stone-950 shadow-sm'
-                  : 'text-stone-400 hover:text-white'
+                  : 'text-stone-400 hover:text-stone-100'
               }`}
             >
               <UserPlus className="w-3.5 h-3.5" />
-              <span>Nuevo Usuario</span>
+              <span>Registrar Empleado</span>
             </button>
           </div>
         </div>
@@ -334,69 +289,47 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             </div>
           )}
 
-          {/* TAB 1: ACCESO RÁPIDO POR ROL (SIN COMPLICACIONES) */}
-          {activeTab === 'quick' && (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between text-xs text-stone-400 px-1">
-                <span className="font-semibold text-stone-300">Selecciona tu Rol para Ingresar:</span>
-                <span className="text-[11px] text-amber-400">1 Clic • Sin Complicaciones</span>
-              </div>
-
-              <div className="space-y-2">
-                {QUICK_ROLES.map((preset) => {
-                  const Icon = preset.icon;
-                  return (
-                    <button
-                      key={preset.role}
-                      type="button"
-                      disabled={isSubmitting}
-                      onClick={() => handleQuickLogin(preset)}
-                      className={`w-full p-3 rounded-2xl border text-left flex items-center justify-between transition-all active:scale-[0.99] cursor-pointer ${preset.bgClass} ${preset.borderClass}`}
-                    >
-                      <div className="flex items-center space-x-3">
-                        <div className={`w-10 h-10 rounded-xl bg-stone-900 border border-stone-800 flex items-center justify-center shrink-0 ${preset.colorClass}`}>
-                          <Icon className="w-5 h-5" />
-                        </div>
-                        <div>
-                          <div className="flex items-center space-x-2">
-                            <span className="font-bold text-sm text-white">{preset.label}</span>
-                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-stone-900 text-stone-300 border border-stone-800 font-mono">
-                              user: {preset.username}
-                            </span>
-                          </div>
-                          <p className="text-[11px] text-stone-400 mt-0.5 leading-snug">
-                            {preset.description}
-                          </p>
-                        </div>
-                      </div>
-                      <ArrowRight className="w-4 h-4 text-stone-500 group-hover:text-amber-400 shrink-0 ml-2" />
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Informative privilege summary */}
-              <div className="mt-4 p-3 bg-stone-950/70 border border-stone-800 rounded-xl text-[11px] text-stone-400 space-y-1">
-                <div className="font-bold text-stone-300 flex items-center space-x-1.5">
-                  <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Mapa de Privilegios del Restaurante:</span>
-                </div>
-                <div className="grid grid-cols-2 gap-1.5 pt-1 text-[10px]">
-                  <div>• <strong>Administrador:</strong> Todo el sistema</div>
-                  <div>• <strong>Cajero:</strong> POS, Ventas, Cierre COP</div>
-                  <div>• <strong>Cocinero:</strong> Comandas KDS Cocina</div>
-                  <div>• <strong>Mesero:</strong> Pedidos en Mesas</div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 2: INICIO CON CREDENCIALES */}
-          {activeTab === 'credentials' && (
+          {/* TAB 1: INICIAR SESIÓN CON USUARIO Y CONTRASEÑA */}
+          {activeTab === 'login' && (
             <form onSubmit={handleCredentialsSubmit} className="space-y-4">
+              
+              {/* Account Quick Selectors (Fills username, user still MUST type password) */}
+              <div className="space-y-1.5">
+                <label className="block text-[11px] font-semibold text-stone-400">
+                  Seleccionar cuenta o escribir usuario:
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {DEFAULT_ACCOUNTS.map((acc) => {
+                    const Icon = acc.icon;
+                    const isSelected = username.toLowerCase() === acc.username.toLowerCase();
+                    return (
+                      <button
+                        key={acc.username}
+                        type="button"
+                        onClick={() => handleSelectAccountHint(acc)}
+                        className={`p-2 rounded-xl border text-left flex items-center space-x-2 transition-all cursor-pointer text-xs ${
+                          isSelected
+                            ? 'border-amber-400 bg-amber-500/15 text-stone-100 font-bold'
+                            : 'border-stone-800 bg-stone-950/60 hover:bg-stone-800 text-stone-300'
+                        }`}
+                      >
+                        <div className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 ${acc.colorClass}`}>
+                          <Icon className="w-3.5 h-3.5" />
+                        </div>
+                        <div className="truncate">
+                          <span className="block truncate font-bold text-xs">{acc.label}</span>
+                          <span className="block text-[10px] text-stone-500 font-mono">@{acc.username}</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Username Input */}
               <div>
                 <label className="block text-xs font-bold text-stone-300 mb-1.5">
-                  Nombre de Usuario:
+                  Usuario:
                 </label>
                 <div className="relative">
                   <User className="w-4 h-4 text-stone-500 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -412,13 +345,15 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 </div>
               </div>
 
+              {/* Password Input */}
               <div>
                 <label className="block text-xs font-bold text-stone-300 mb-1.5">
-                  Contraseña:
+                  Contraseña de Seguridad:
                 </label>
                 <div className="relative">
                   <KeyRound className="w-4 h-4 text-stone-500 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
+                    ref={passwordInputRef}
                     type={showPassword ? 'text' : 'password'}
                     required
                     value={password}
@@ -429,63 +364,82 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-500 hover:text-stone-300"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-500 hover:text-stone-300 p-1"
+                    title={showPassword ? 'Ocultar contraseña' : 'Ver contraseña'}
                   >
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
-                <span className="text-[10px] text-stone-500 mt-1 block">
-                  Contraseñas por defecto: <code className="text-amber-400">admin123</code>, <code className="text-amber-400">cajero123</code>, <code className="text-amber-400">cocina123</code>
-                </span>
+                <div className="mt-1 flex items-center justify-between text-[11px] text-stone-500">
+                  <span>Claves por defecto: <code className="text-amber-400 font-mono">admin123</code>, <code className="text-amber-400 font-mono">cajero123</code></span>
+                </div>
               </div>
 
+              {/* Privileges Guide */}
+              <div className="p-3 bg-stone-950 border border-stone-800 rounded-xl text-[11px] text-stone-400 space-y-1">
+                <div className="font-bold text-stone-300 flex items-center space-x-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Áreas permitidas por rol:</span>
+                </div>
+                <div className="grid grid-cols-2 gap-1.5 pt-1 text-[10px]">
+                  <div>• <strong>Administrador:</strong> Acceso Total</div>
+                  <div>• <strong>Cajero:</strong> POS, Ventas, Cierre COP</div>
+                  <div>• <strong>Cocinero:</strong> Monitor KDS Cocina</div>
+                  <div>• <strong>Mesero:</strong> Pedidos en Mesas</div>
+                </div>
+              </div>
+
+              {/* Submit Button */}
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="w-full py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-stone-950 font-black rounded-xl text-sm shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center space-x-2 cursor-pointer disabled:opacity-50"
+                className="w-full py-3 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-stone-950 font-black rounded-xl text-sm shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center space-x-2 cursor-pointer disabled:opacity-50 active:scale-98"
               >
                 {isSubmitting ? (
-                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <RefreshCw className="w-4 h-4 animate-spin text-stone-950" />
                 ) : (
                   <>
-                    <LogIn className="w-4 h-4" />
-                    <span>Iniciar Sesión</span>
+                    <Lock className="w-4 h-4" />
+                    <span>Validar e Iniciar Sesión</span>
                   </>
                 )}
               </button>
             </form>
           )}
 
-          {/* TAB 3: REGISTRAR / EDITAR USUARIOS */}
+          {/* TAB 2: REGISTRAR / CREAR USUARIOS */}
           {activeTab === 'register' && (
             <form onSubmit={handleRegisterSubmit} className="space-y-3.5">
               <div>
                 <label className="block text-xs font-bold text-stone-300 mb-1">
                   Nombre de Usuario:
                 </label>
-                <input
-                  type="text"
-                  required
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  placeholder="ej: carlos_cajero"
-                  className="w-full px-3 py-2 bg-stone-950 border border-stone-800 rounded-xl text-stone-100 text-xs focus:outline-none focus:border-amber-500"
-                />
+                <div className="relative">
+                  <User className="w-4 h-4 text-stone-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    required
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    placeholder="ej: juan_cajero"
+                    className="w-full pl-9 pr-3 py-2 bg-stone-950 border border-stone-800 rounded-xl text-stone-100 text-xs focus:outline-none focus:border-amber-500 font-medium"
+                  />
+                </div>
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-stone-300 mb-1">
-                  Rol y Nivel de Privilegios:
+                  Rol y Privilegio Asignado:
                 </label>
                 <select
                   value={role}
                   onChange={(e) => setRole(e.target.value as UserRole)}
                   className="w-full px-3 py-2 bg-stone-950 border border-stone-800 rounded-xl text-stone-200 text-xs focus:outline-none focus:border-amber-500"
                 >
-                  <option value="Administrador">Administrador (Acceso Total a todo el POS)</option>
-                  <option value="Cajero">Cajero (POS, Ventas, Cierre de Caja COP)</option>
-                  <option value="Cocinero">Cocinero (Monitor KDS de Cocina)</option>
-                  <option value="Mesero">Mesero (Toma de Pedidos en Mesas)</option>
+                  <option value="Administrador">👑 Administrador (Acceso Total al Sistema)</option>
+                  <option value="Cajero">💵 Cajero (POS, Ventas, WhatsApp, Cierre de Caja COP)</option>
+                  <option value="Cocinero">👨‍🍳 Cocinero (Monitor KDS y Tiempos de Cocina)</option>
+                  <option value="Mesero">🍽️ Mesero (Toma de Pedidos en Mesas y Carta)</option>
                 </select>
               </div>
 
@@ -512,7 +466,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                     required
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
-                    placeholder="Repita la contraseña"
+                    placeholder="Repita la clave"
                     className="w-full px-3 py-2 bg-stone-950 border border-stone-800 rounded-xl text-stone-100 text-xs focus:outline-none focus:border-amber-500 font-mono"
                   />
                 </div>
@@ -524,11 +478,11 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 className="w-full py-2.5 bg-gradient-to-r from-emerald-600 to-green-500 hover:from-emerald-500 hover:to-green-400 text-stone-950 font-black rounded-xl text-xs shadow-lg shadow-emerald-500/20 transition-all flex items-center justify-center space-x-2 cursor-pointer disabled:opacity-50"
               >
                 {isSubmitting ? (
-                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <RefreshCw className="w-4 h-4 animate-spin text-stone-950" />
                 ) : (
                   <>
                     <UserPlus className="w-4 h-4" />
-                    <span>Guardar Usuario en Base de Datos</span>
+                    <span>Guardar Usuario en SQLite</span>
                   </>
                 )}
               </button>
@@ -544,7 +498,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             <span>Usuarios protegidos en <strong>TerrenoBroaster.db</strong></span>
           </div>
           <span className="font-mono text-stone-500">
-            {registeredUsers.length} usuario{registeredUsers.length !== 1 ? 's' : ''} registrado{registeredUsers.length !== 1 ? 's' : ''}
+            {registeredUsers.length} usuario{registeredUsers.length !== 1 ? 's' : ''} activo{registeredUsers.length !== 1 ? 's' : ''}
           </span>
         </div>
 
@@ -552,3 +506,4 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     </div>
   );
 };
+export default LoginModal;

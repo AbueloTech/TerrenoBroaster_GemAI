@@ -12,6 +12,8 @@ import {
   PanelLeftOpen,
   Bluetooth,
   Calculator,
+  Sun,
+  Moon,
 } from 'lucide-react';
 import { Usuario } from '../types';
 import { BrandLogo } from './BrandLogo';
@@ -32,6 +34,8 @@ interface NavbarProps {
   currentUser?: Usuario | null;
   pendingWhatsAppCount?: number;
   activeComandasCount?: number;
+  currentTheme?: 'dark' | 'light';
+  onToggleTheme?: () => void;
 }
 
 const TAB_TITLES: Record<NavTab, string> = {
@@ -56,6 +60,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   currentUser,
   pendingWhatsAppCount = 0,
   activeComandasCount = 0,
+  currentTheme = 'dark',
+  onToggleTheme,
 }) => {
   const [timeStr, setTimeStr] = useState<string>('');
   const [isBtConnected, setIsBtConnected] = useState<boolean>(kitchenPrinterService.isBluetoothConnected());
@@ -162,6 +168,33 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <Clock className="w-3.5 h-3.5 text-amber-400" />
                 <span>{timeStr}</span>
               </div>
+            )}
+
+            {/* Dark / Light Mode Switcher Button */}
+            {onToggleTheme && (
+              <button
+                type="button"
+                onClick={onToggleTheme}
+                title={
+                  currentTheme === 'dark'
+                    ? 'Cambiar a Modo Claro (Día)'
+                    : 'Cambiar a Modo Oscuro (Noche)'
+                }
+                className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer shadow-sm active:scale-95 shrink-0 bg-stone-950 hover:bg-stone-800 border-stone-800 text-stone-200"
+                aria-label="Cambiar tema de color claro/oscuro"
+              >
+                {currentTheme === 'dark' ? (
+                  <>
+                    <Sun className="w-4 h-4 text-amber-400 animate-[spin_16s_linear_infinite]" />
+                    <span className="hidden lg:inline text-xs font-semibold">Modo Claro</span>
+                  </>
+                ) : (
+                  <>
+                    <Moon className="w-4 h-4 text-amber-600 fill-amber-600/20" />
+                    <span className="hidden lg:inline text-xs font-semibold text-stone-800">Modo Oscuro</span>
+                  </>
+                )}
+              </button>
             )}
 
             {/* Essential Action 1: QR Code Modal Button - Always 1 click away */}

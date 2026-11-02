@@ -25,6 +25,8 @@ import {
   X,
   Package,
   Calculator,
+  Sun,
+  Moon,
 } from 'lucide-react';
 import { NavTab } from './Navbar';
 import { Usuario } from '../types';
@@ -53,6 +55,8 @@ interface SidebarProps {
   totalPlatosCount: number;
   activeComandasCount?: number;
   pendingWhatsAppCount?: number;
+  currentTheme?: 'dark' | 'light';
+  onToggleTheme?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -78,6 +82,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   totalPlatosCount,
   activeComandasCount = 0,
   pendingWhatsAppCount = 0,
+  currentTheme = 'dark',
+  onToggleTheme,
 }) => {
   const handleNavClick = (tab: NavTab) => {
     onTabChange(tab);
@@ -433,6 +439,32 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </button>
 
             {/* 4.4 Pantalla Splash */}
+            {/* 4.5 Switcher de Tema Claro / Oscuro */}
+            {onToggleTheme && (
+              <button
+                type="button"
+                onClick={() => handleActionClick(onToggleTheme)}
+                title={
+                  currentTheme === 'dark'
+                    ? 'Cambiar a Modo Claro (Día)'
+                    : 'Cambiar a Modo Oscuro (Noche)'
+                }
+                className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl text-xs sm:text-sm font-semibold text-stone-300 hover:text-amber-400 hover:bg-stone-800 transition-all group cursor-pointer"
+              >
+                {currentTheme === 'dark' ? (
+                  <>
+                    <Sun className="w-5 h-5 text-amber-400 shrink-0 group-hover:rotate-45 transition-transform" />
+                    {isExpanded && <span className="truncate">Modo Claro (Día)</span>}
+                  </>
+                ) : (
+                  <>
+                    <Moon className="w-5 h-5 text-amber-500 shrink-0 group-hover:scale-110 transition-transform" />
+                    {isExpanded && <span className="truncate text-stone-800 font-bold">Modo Oscuro (Noche)</span>}
+                  </>
+                )}
+              </button>
+            )}
+
             {onShowSplash && (
               <button
                 onClick={() => handleActionClick(onShowSplash)}

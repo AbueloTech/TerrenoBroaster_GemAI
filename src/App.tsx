@@ -26,6 +26,7 @@ import { menuSyncService } from './services/menuSyncService';
 import { playWhatsAppIncomingAlert, playNotificationSound } from './utils/soundAlert';
 import { formatCurrency } from './utils/currency';
 import { safeStorage } from './utils/safeStorage';
+import { getStoredTheme, applyTheme, toggleTheme, AppTheme } from './utils/theme';
 import { MessageSquare, Bell, ArrowRight, X, Truck, Package, Volume2, Settings, ShieldAlert } from 'lucide-react';
 
 interface IncomingWhatsAppAlert {
@@ -83,6 +84,17 @@ export default function App() {
 
   // Splash & User Authentication State
   const [showSplash, setShowSplash] = useState<boolean>(true);
+  const [theme, setTheme] = useState<AppTheme>(() => getStoredTheme());
+
+  useEffect(() => {
+    applyTheme(theme);
+  }, [theme]);
+
+  const handleToggleTheme = () => {
+    const next = toggleTheme(theme);
+    setTheme(next);
+  };
+
   const [currentUser, setCurrentUser] = useState<Usuario | null>(() => {
     try {
       const saved = safeStorage.getItem('tb_logged_user');
@@ -430,6 +442,8 @@ export default function App() {
         currentUser={currentUser}
         pendingWhatsAppCount={pendingWhatsAppCount}
         activeComandasCount={activeComandasCount}
+        currentTheme={theme}
+        onToggleTheme={handleToggleTheme}
       />
 
       {/* Main Body Layout: Collapsible Categorized Sidebar + Content */}
@@ -463,6 +477,8 @@ export default function App() {
           totalPlatosCount={platos.length}
           activeComandasCount={activeComandasCount}
           pendingWhatsAppCount={pendingWhatsAppCount}
+          currentTheme={theme}
+          onToggleTheme={handleToggleTheme}
         />
 
         <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
