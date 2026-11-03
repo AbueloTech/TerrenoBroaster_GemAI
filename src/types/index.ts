@@ -164,7 +164,8 @@ export interface Insumo {
   UnidadMedida: UnidadMedida;
   StockActual: number;
   StockMinimo: number;
-  CostoUnitario: number; // Costo por UnidadMedida (en $ o Bs)
+  CostoUnitario: number; // Costo por UnidadMedida (en $ o COP)
+  PrecioVenta?: number; // Precio de venta al público para productos de venta directa
   ProveedorId?: number;
   ProveedorNombre?: string;
   EsVentaDirecta?: boolean; // True si es un producto terminado que se vende directo (ej: refrescos, agua)
@@ -200,6 +201,8 @@ export interface PlatoEscandallo {
   PrecioSugeridoMargen50: number; // CostoTotalInsumos / 0.50
   PrecioSugeridoMargen70: number; // CostoTotalInsumos / 0.30
   TieneReceta: boolean;
+  EsVentaDirecta?: boolean;
+  InsumoId?: number;
 }
 
 export interface Proveedor {

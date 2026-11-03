@@ -95,6 +95,12 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
   const [isInsumoModalOpen, setIsInsumoModalOpen] = useState(false);
   const [editingInsumo, setEditingInsumo] = useState<Insumo | null>(null);
 
+  // Controlled states for direct sale pricing & cost structure in modal
+  const [modalEsVentaDirecta, setModalEsVentaDirecta] = useState(false);
+  const [modalCostoUnitario, setModalCostoUnitario] = useState<number>(1.0);
+  const [modalPrecioVenta, setModalPrecioVenta] = useState<number>(2.0);
+  const [modalSyncPlato, setModalSyncPlato] = useState(true);
+
   const [isEntradaModalOpen, setIsEntradaModalOpen] = useState(false);
   const [selectedInsumoForEntrada, setSelectedInsumoForEntrada] = useState<Insumo | null>(null);
   const [entradaCantidad, setEntradaCantidad] = useState<number>(1);
@@ -124,6 +130,33 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
+  };
+
+  // Open Insumo modal for creating new item
+  const openNewInsumoModal = (forceVentaDirecta = false) => {
+    setEditingInsumo(null);
+    setModalEsVentaDirecta(forceVentaDirecta);
+    setModalCostoUnitario(1.0);
+    setModalPrecioVenta(forceVentaDirecta ? 2.5 : 2.0);
+    setModalSyncPlato(true);
+    setIsInsumoModalOpen(true);
+  };
+
+  // Open Insumo modal for editing existing item
+  const openEditInsumoModal = (ins: Insumo) => {
+    setEditingInsumo(ins);
+    setModalEsVentaDirecta(Boolean(ins.EsVentaDirecta));
+    setModalCostoUnitario(ins.CostoUnitario || 1.0);
+    const linkedPlato = ins.PlatoId
+      ? platos.find((p) => p.ID === ins.PlatoId)
+      : platos.find((p) => p.Plato.trim().toLowerCase() === ins.Nombre.trim().toLowerCase());
+    const initialPrice =
+      ins.PrecioVenta && ins.PrecioVenta > 0
+        ? ins.PrecioVenta
+        : linkedPlato?.Precio || (ins.CostoUnitario > 0 ? Math.round(ins.CostoUnitario / 0.5) : 2.0);
+    setModalPrecioVenta(initialPrice);
+    setModalSyncPlato(true);
+    setIsInsumoModalOpen(true);
   };
 
   // Load all data
@@ -156,13 +189,22 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
     return () => unsub();
   }, []);
 
-  // Update recipe items when selected dish changes
+  // Update recipe items when selected dish changes (handles both recipes and direct sale items)
   useEffect(() => {
     if (selectedPlatoId !== null) {
       const rec = sqliteService.getRecetaByPlato(selectedPlatoId);
-      setRecetaItems(rec);
+      if (rec.length > 0) {
+        setRecetaItems(rec);
+      } else {
+        const esc = escandallos.find((e) => e.PlatoId === selectedPlatoId);
+        if (esc && esc.Ingredientes && esc.Ingredientes.length > 0) {
+          setRecetaItems(esc.Ingredientes);
+        } else {
+          setRecetaItems([]);
+        }
+      }
     }
-  }, [selectedPlatoId]);
+  }, [selectedPlatoId, escandallos]);
 
   // Handle direct file linking
   const handleLinkLocalFile = async () => {
@@ -262,18 +304,20 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
     const unidad = formData.get('unidad') as UnidadMedida;
     const stockActual = safeParsePrice(formData.get('stockActual'));
     const stockMinimo = safeParsePrice(formData.get('stockMinimo'));
-    const costoUnitario = safeParsePrice(formData.get('costoUnitario'));
+    const costoUnitario = safeParsePrice(modalCostoUnitario);
     const proveedorIdRaw = formData.get('proveedorId');
     const proveedorId = proveedorIdRaw ? Number(proveedorIdRaw) : undefined;
-    const esVentaDirecta = formData.get('esVentaDirecta') === 'true';
+    const esVentaDirecta = modalEsVentaDirecta;
+    const precioVenta = esVentaDirecta ? safeParsePrice(modalPrecioVenta) : undefined;
 
     if (!nombre) {
       showToast('Por favor introduce el nombre del insumo');
       return;
     }
 
+    let savedInsumo: Insumo;
     if (editingInsumo) {
-      sqliteService.updateInsumo({
+      savedInsumo = {
         ...editingInsumo,
         Nombre: nombre,
         Categoria: categoria,
@@ -281,22 +325,32 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
         StockActual: stockActual,
         StockMinimo: stockMinimo,
         CostoUnitario: costoUnitario,
+        PrecioVenta: precioVenta,
         ProveedorId: proveedorId,
         EsVentaDirecta: esVentaDirecta,
-      });
+      };
+      sqliteService.updateInsumo(savedInsumo);
       showToast(`Insumo "${nombre}" actualizado correctamente.`);
     } else {
-      sqliteService.addInsumo({
+      savedInsumo = sqliteService.addInsumo({
         Nombre: nombre,
         Categoria: categoria,
         UnidadMedida: unidad,
         StockActual: stockActual,
         StockMinimo: stockMinimo,
         CostoUnitario: costoUnitario,
+        PrecioVenta: precioVenta,
         ProveedorId: proveedorId,
         EsVentaDirecta: esVentaDirecta,
       });
       showToast(`Insumo "${nombre}" creado correctamente.`);
+    }
+
+    // Automatically sync or publish to POS Menu if selected
+    if (esVentaDirecta && modalSyncPlato && precioVenta && precioVenta > 0) {
+      sqliteService.syncDirectSalePlato(savedInsumo.InsumoId, nombre, precioVenta, categoria);
+      showToast(`Producto "${nombre}" publicado en la Carta del Menú POS.`);
+      if (onRefreshPlatos) onRefreshPlatos();
     }
 
     setIsInsumoModalOpen(false);
@@ -411,6 +465,17 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
       ...selectedPlato,
       Precio: rounded,
     });
+
+    if (selectedEscandallo?.InsumoId) {
+      const ins = insumos.find((i) => i.InsumoId === selectedEscandallo.InsumoId);
+      if (ins) {
+        sqliteService.updateInsumo({
+          ...ins,
+          PrecioVenta: rounded,
+        });
+      }
+    }
+
     showToast(`¡Precio de "${selectedPlato.Plato}" actualizado a $${rounded.toFixed(2)} en el POS!`);
     loadData();
     if (onRefreshPlatos) onRefreshPlatos();
@@ -1085,14 +1150,20 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
                   className="flex items-center space-x-2 px-3.5 py-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700 text-xs sm:text-sm font-bold transition-all shadow-sm active:scale-95 cursor-pointer"
                 >
                   <Printer className="w-4 h-4 text-emerald-400" />
-                  <span>Imprimir Stock</span>
+                  <span className="hidden sm:inline">Imprimir Stock</span>
                 </button>
 
                 <button
-                  onClick={() => {
-                    setEditingInsumo(null);
-                    setIsInsumoModalOpen(true);
-                  }}
+                  onClick={() => openNewInsumoModal(true)}
+                  className="flex items-center space-x-2 px-3.5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs sm:text-sm font-bold transition-all shadow-md active:scale-95 cursor-pointer"
+                  title="Registrar producto de venta directa con estructura de costos y margen"
+                >
+                  <Package className="w-4 h-4" />
+                  <span>+ Venta Directa</span>
+                </button>
+
+                <button
+                  onClick={() => openNewInsumoModal(false)}
                   className="flex items-center space-x-2 px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 text-xs sm:text-sm font-black transition-all shadow-md active:scale-95 cursor-pointer"
                 >
                   <Plus className="w-4 h-4" />
@@ -1109,10 +1180,10 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
                     <tr>
                       <th className="py-3 px-4">Insumo</th>
                       <th className="py-3 px-4">Categoría</th>
-                      <th className="py-3 px-4">Tipo</th>
+                      <th className="py-3 px-4">Tipo & Venta POS</th>
                       <th className="py-3 px-4 text-center">Stock Actual</th>
                       <th className="py-3 px-4 text-center">Mínimo</th>
-                      <th className="py-3 px-4 text-right">Costo Unitario</th>
+                      <th className="py-3 px-4 text-right">Costo / Margen</th>
                       <th className="py-3 px-4 text-right">Valor Total</th>
                       <th className="py-3 px-4">Proveedor</th>
                       <th className="py-3 px-4 text-center">Acciones</th>
@@ -1130,6 +1201,9 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
                       filteredInsumos.map((item) => {
                         const isBajoMinimo = item.StockActual <= item.StockMinimo;
                         const isAdvertencia = item.StockActual > item.StockMinimo && item.StockActual <= item.StockMinimo * 1.5;
+                        const hasVenta = item.EsVentaDirecta && item.PrecioVenta && item.PrecioVenta > 0;
+                        const margenBruto = hasVenta ? (item.PrecioVenta! - item.CostoUnitario) : 0;
+                        const margenPct = hasVenta ? ((margenBruto / item.PrecioVenta!) * 100) : 0;
 
                         return (
                           <tr key={item.InsumoId} className="hover:bg-stone-800/40 transition-colors">
@@ -1147,12 +1221,30 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
                               </span>
                             </td>
 
-                            {/* Tipo */}
+                            {/* Tipo & Venta POS */}
                             <td className="py-3.5 px-4">
                               {item.EsVentaDirecta ? (
-                                <span className="px-2 py-0.5 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-300 text-[10px] font-bold">
-                                  Venta Directa POS
-                                </span>
+                                <div className="space-y-1">
+                                  <span className="px-2 py-0.5 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-300 text-[10px] font-bold inline-block">
+                                    🏷️ Venta Directa
+                                  </span>
+                                  {hasVenta ? (
+                                    <div className="text-[11px] leading-tight font-mono">
+                                      <span className="text-emerald-400 font-bold">${item.PrecioVenta!.toFixed(2)}</span>
+                                      <span className="text-stone-400 ml-1">
+                                        ({margenPct.toFixed(0)}% mg)
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => openEditInsumoModal(item)}
+                                      className="text-[10px] text-amber-400 hover:text-amber-300 block font-bold cursor-pointer underline"
+                                    >
+                                      + Fijar precio de venta
+                                    </button>
+                                  )}
+                                </div>
                               ) : (
                                 <span className="px-2 py-0.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[10px] font-bold">
                                   Materia Prima
@@ -1191,9 +1283,14 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
                               {item.StockMinimo} {item.UnidadMedida}
                             </td>
 
-                            {/* Costo Unitario */}
+                            {/* Costo Unitario & Margen */}
                             <td className="py-3.5 px-4 text-right font-mono text-stone-300">
-                              ${item.CostoUnitario.toFixed(2)}
+                              <div>${item.CostoUnitario.toFixed(2)}</div>
+                              {hasVenta && (
+                                <div className={`text-[10px] font-bold ${margenBruto >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                  {margenBruto >= 0 ? `+$${margenBruto.toFixed(2)}` : `-$${Math.abs(margenBruto).toFixed(2)}`}
+                                </div>
+                              )}
                             </td>
 
                             {/* Valor Total */}
@@ -1209,6 +1306,17 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
                             {/* Acciones */}
                             <td className="py-3.5 px-4 text-center">
                               <div className="flex items-center justify-center space-x-1">
+                                {/* Estructura de Costos para Venta Directa */}
+                                {item.EsVentaDirecta && (
+                                  <button
+                                    onClick={() => openEditInsumoModal(item)}
+                                    title="Ver y configurar Estructura de Costos & Margen"
+                                    className="p-1.5 rounded-lg bg-blue-500/10 text-blue-400 hover:bg-blue-500 hover:text-white transition-all cursor-pointer"
+                                  >
+                                    <Calculator className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+
                                 {/* Entrada / Compra rápida */}
                                 <button
                                   onClick={() => {
@@ -1240,10 +1348,7 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
 
                                 {/* Editar */}
                                 <button
-                                  onClick={() => {
-                                    setEditingInsumo(item);
-                                    setIsInsumoModalOpen(true);
-                                  }}
+                                  onClick={() => openEditInsumoModal(item)}
                                   title="Editar Insumo"
                                   className="p-1.5 rounded-lg bg-stone-800 text-stone-300 hover:bg-amber-500 hover:text-stone-950 transition-all cursor-pointer"
                                 >
@@ -1328,10 +1433,17 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
                       </div>
 
                       {hasRecipe ? (
-                        <span className="shrink-0 px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold flex items-center gap-1">
-                          <Check className="w-3 h-3" />
-                          Escandallo
-                        </span>
+                        esc?.EsVentaDirecta ? (
+                          <span className="shrink-0 px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30 text-[10px] font-bold flex items-center gap-1">
+                            <Package className="w-3 h-3" />
+                            Venta Directa
+                          </span>
+                        ) : (
+                          <span className="shrink-0 px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold flex items-center gap-1">
+                            <Check className="w-3 h-3" />
+                            Escandallo
+                          </span>
+                        )
                       ) : (
                         <span className="shrink-0 px-2 py-0.5 rounded-full bg-stone-800 text-stone-500 text-[10px]">
                           Sin receta
@@ -1351,9 +1463,16 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
                   <div className="bg-stone-900 border border-stone-800 rounded-2xl p-5 shadow-lg">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-stone-800">
                       <div>
-                        <span className="text-xs uppercase tracking-wider text-amber-400 font-bold block">
-                          Ficha Técnica / Escandallo Gastronómico
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs uppercase tracking-wider text-amber-400 font-bold block">
+                            Ficha Técnica / Escandallo Gastronómico
+                          </span>
+                          {selectedEscandallo?.EsVentaDirecta && (
+                            <span className="px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30 text-[10px] font-bold">
+                              🏷️ Venta Directa
+                            </span>
+                          )}
+                        </div>
                         <h2 className="text-2xl font-black text-white">{selectedPlato.Plato}</h2>
                         <span className="text-xs text-stone-400">Categoría: {selectedPlato.Categoria}</span>
                       </div>
@@ -1375,6 +1494,28 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
                         </div>
                       </div>
                     </div>
+
+                    {/* Banner for Direct Sale Products */}
+                    {selectedEscandallo?.EsVentaDirecta && (
+                      <div className="mt-4 p-3.5 rounded-xl bg-blue-500/10 border border-blue-500/30 flex items-start gap-3">
+                        <div className="p-2 rounded-lg bg-blue-500/20 text-blue-400 shrink-0 mt-0.5">
+                          <Package className="w-4 h-4" />
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-black text-blue-300 uppercase tracking-wider">
+                              Producto de Venta Directa (Sin Preparación Culinaria)
+                            </span>
+                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-blue-500/20 text-blue-300 font-bold">
+                              Listo para consumo
+                            </span>
+                          </div>
+                          <p className="text-xs text-stone-300 mt-1 leading-relaxed">
+                            Este producto se vende directo en mostrador o delivery en su empaque original. Su costo unitario se toma automáticamente del valor de compra registrado en almacén ($<span className="font-mono font-bold text-white">{pricingAnalysis.costo.toFixed(2)}</span>), permitiendo costearlo y fijar su precio de venta al público en el POS con la misma estructura que las recetas de cocina.
+                          </p>
+                        </div>
+                      </div>
+                    )}
 
                     {/* Food Cost & Margins Analysis Grid */}
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
@@ -1492,134 +1633,193 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
                     </div>
                   </div>
 
-                  {/* Recipe Items Table & Ingredients Composer */}
-                  <div className="bg-stone-900 border border-stone-800 rounded-2xl p-5 shadow-lg space-y-4">
-                    <div className="flex items-center justify-between">
-                      <h3 className="font-black text-white text-base flex items-center gap-2">
-                        <ChefHat className="w-5 h-5 text-amber-400" />
-                        <span>Ingredientes & Insumos Utilizados (Por 1 Porción)</span>
-                      </h3>
-                      <button
-                        onClick={handleSaveReceta}
-                        className="flex items-center space-x-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs sm:text-sm rounded-xl transition-all shadow-md active:scale-95 cursor-pointer"
-                      >
-                        <Save className="w-4 h-4" />
-                        <span>Guardar Receta</span>
-                      </button>
-                    </div>
-
-                    {/* Ingredients Table */}
-                    <div className="overflow-x-auto rounded-xl border border-stone-800">
-                      <table className="w-full text-left text-xs sm:text-sm text-stone-300">
-                        <thead className="bg-stone-950 text-stone-400 font-bold uppercase text-[10px] tracking-wider border-b border-stone-800">
-                          <tr>
-                            <th className="py-2.5 px-3">Insumo</th>
-                            <th className="py-2.5 px-3">Categoría</th>
-                            <th className="py-2.5 px-3 text-center">Cantidad Consumida</th>
-                            <th className="py-2.5 px-3 text-right">Costo Insumo</th>
-                            <th className="py-2.5 px-3 text-right">Costo en Porción</th>
-                            <th className="py-2.5 px-3 text-center">Quitar</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-stone-800/60 font-medium">
-                          {recetaItems.length === 0 ? (
-                            <tr>
-                              <td colSpan={6} className="py-8 text-center text-stone-500">
-                                Este plato aún no tiene ingredientes agregados. Selecciona insumos abajo para armar la receta.
-                              </td>
-                            </tr>
-                          ) : (
-                            recetaItems.map((item) => {
-                              const ins = insumos.find((i) => i.InsumoId === item.InsumoId);
-                              const nombre = ins ? ins.Nombre : (item.InsumoNombre || 'Insumo');
-                              const cat = ins ? ins.Categoria : (item.InsumoCategoria || 'Insumos');
-                              const costoUnit = ins ? ins.CostoUnitario : (item.CostoUnitarioInsumo || 0);
-                              const subtotal = item.Cantidad * costoUnit;
-
-                              return (
-                                <tr key={item.InsumoId} className="hover:bg-stone-800/40">
-                                  <td className="py-2.5 px-3 font-bold text-white">{nombre}</td>
-                                  <td className="py-2.5 px-3 text-stone-400 text-xs">{cat}</td>
-                                  <td className="py-2.5 px-3 text-center font-mono font-bold text-amber-300">
-                                    {item.Cantidad} {ins?.UnidadMedida || item.UnidadMedida}
-                                  </td>
-                                  <td className="py-2.5 px-3 text-right font-mono text-stone-400">
-                                    ${costoUnit.toFixed(2)}
-                                  </td>
-                                  <td className="py-2.5 px-3 text-right font-mono font-bold text-red-400">
-                                    ${subtotal.toFixed(2)}
-                                  </td>
-                                  <td className="py-2.5 px-3 text-center">
-                                    <button
-                                      onClick={() => handleRemoveIngrediente(item.InsumoId)}
-                                      className="p-1 rounded hover:bg-red-500/20 text-red-400 transition-colors cursor-pointer"
-                                    >
-                                      <Trash2 className="w-4 h-4" />
-                                    </button>
-                                  </td>
-                                </tr>
-                              );
-                            })
-                          )}
-                        </tbody>
-                        {recetaItems.length > 0 && (
-                          <tfoot className="bg-stone-950 font-black border-t border-stone-800 text-stone-200">
-                            <tr>
-                              <td colSpan={4} className="py-3 px-3 text-right uppercase text-xs">
-                                Total Costo Materia Prima (Food Cost):
-                              </td>
-                              <td className="py-3 px-3 text-right text-red-400 font-mono text-base">
-                                ${currentCalculatedFoodCost.toFixed(2)}
-                              </td>
-                              <td></td>
-                            </tr>
-                          </tfoot>
-                        )}
-                      </table>
-                    </div>
-
-                    {/* Add Ingredient Form Bar */}
-                    <div className="p-3.5 rounded-xl bg-stone-950 border border-stone-800 flex flex-col sm:flex-row items-center gap-3">
-                      {/* Select Insumo */}
-                      <select
-                        value={newIngredienteInsumoId}
-                        onChange={(e) => setNewIngredienteInsumoId(e.target.value ? Number(e.target.value) : '')}
-                        className="w-full sm:flex-1 bg-stone-900 border border-stone-700 rounded-xl px-3 py-2 text-xs sm:text-sm text-white focus:outline-none focus:border-amber-400"
-                      >
-                        <option value="">-- Seleccionar Insumo del Inventario --</option>
-                        {insumos.map((i) => (
-                          <option key={i.InsumoId} value={i.InsumoId}>
-                            {i.Nombre} ({i.Categoria}) - ${i.CostoUnitario.toFixed(2)} / {i.UnidadMedida}
-                          </option>
-                        ))}
-                      </select>
-
-                      {/* Quantity */}
-                      <div className="w-full sm:w-36 flex items-center space-x-2">
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0.01"
-                          placeholder="Cantidad"
-                          value={newIngredienteCantidad}
-                          onChange={(e) => setNewIngredienteCantidad(parseFloat(e.target.value) || 0)}
-                          className="w-full bg-stone-900 border border-stone-700 rounded-xl px-3 py-2 text-xs sm:text-sm text-white font-mono text-center focus:outline-none focus:border-amber-400"
-                        />
-                        <span className="text-xs text-stone-400 shrink-0">
-                          {newIngredienteInsumoId ? insumos.find((i) => i.InsumoId === Number(newIngredienteInsumoId))?.UnidadMedida : ''}
-                        </span>
+                  {/* Bottom Panel: Direct Sale Product Info OR Recipe Builder */}
+                  {selectedEscandallo?.EsVentaDirecta ? (
+                    <div className="bg-stone-900 border border-stone-800 rounded-2xl p-5 shadow-lg space-y-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-stone-800">
+                        <div className="flex items-center gap-2">
+                          <Package className="w-5 h-5 text-blue-400" />
+                          <h3 className="font-black text-white text-base">
+                            Insumo Base de Venta Directa
+                          </h3>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const ins = insumos.find((i) => i.InsumoId === selectedEscandallo.InsumoId);
+                            if (ins) {
+                              openEditInsumoModal(ins);
+                            }
+                          }}
+                          className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-xs transition-all shadow cursor-pointer self-start sm:self-auto"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                          <span>Editar Insumo en Inventario</span>
+                        </button>
                       </div>
 
-                      {/* Add Button */}
-                      <button
-                        type="button"
-                        onClick={handleAddIngredienteToReceta}
-                        className="w-full sm:w-auto px-4 py-2 bg-amber-500 hover:bg-amber-400 text-stone-950 font-black text-xs sm:text-sm rounded-xl transition-all shadow cursor-pointer whitespace-nowrap"
-                      >
-                        + Añadir Insumo
-                      </button>
+                      <div className="p-4 bg-stone-950 rounded-xl border border-stone-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-white font-bold text-base">{selectedPlato.Plato}</span>
+                            <span className="px-2 py-0.5 rounded-md bg-blue-500/20 text-blue-300 text-[10px] font-bold">
+                              1 Unidad de Venta Directa
+                            </span>
+                          </div>
+                          <p className="text-stone-400 text-xs mt-1">
+                            Categoría: {selectedPlato.Categoria} • Suministrado directamente al consumidor sin preparación en cocina.
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-6">
+                          <div className="text-right">
+                            <span className="text-stone-400 text-[10px] uppercase font-bold block">Costo de Compra</span>
+                            <span className="font-mono font-black text-red-400 text-lg">
+                              ${pricingAnalysis.costo.toFixed(2)}
+                            </span>
+                          </div>
+                          <div className="border-l border-stone-800 pl-6 text-right">
+                            <span className="text-stone-400 text-[10px] uppercase font-bold block">Margen Neto Unitario</span>
+                            <span className="font-mono font-black text-emerald-400 text-lg">
+                              +${pricingAnalysis.margenBruto.toFixed(2)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="p-3 rounded-xl bg-stone-950/60 border border-stone-800 text-xs text-stone-300 flex items-center justify-between">
+                        <span>💡 El precio al consumidor puede ser actualizado directamente usando los botones de <strong>Precios Sugeridos por Margen</strong> arriba.</span>
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    /* Recipe Items Table & Ingredients Composer */
+                    <div className="bg-stone-900 border border-stone-800 rounded-2xl p-5 shadow-lg space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h3 className="font-black text-white text-base flex items-center gap-2">
+                          <ChefHat className="w-5 h-5 text-amber-400" />
+                          <span>Ingredientes & Insumos Utilizados (Por 1 Porción)</span>
+                        </h3>
+                        <button
+                          onClick={handleSaveReceta}
+                          className="flex items-center space-x-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs sm:text-sm rounded-xl transition-all shadow-md active:scale-95 cursor-pointer"
+                        >
+                          <Save className="w-4 h-4" />
+                          <span>Guardar Receta</span>
+                        </button>
+                      </div>
+
+                      {/* Ingredients Table */}
+                      <div className="overflow-x-auto rounded-xl border border-stone-800">
+                        <table className="w-full text-left text-xs sm:text-sm text-stone-300">
+                          <thead className="bg-stone-950 text-stone-400 font-bold uppercase text-[10px] tracking-wider border-b border-stone-800">
+                            <tr>
+                              <th className="py-2.5 px-3">Insumo</th>
+                              <th className="py-2.5 px-3">Categoría</th>
+                              <th className="py-2.5 px-3 text-center">Cantidad Consumida</th>
+                              <th className="py-2.5 px-3 text-right">Costo Insumo</th>
+                              <th className="py-2.5 px-3 text-right">Costo en Porción</th>
+                              <th className="py-2.5 px-3 text-center">Quitar</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-stone-800/60 font-medium">
+                            {recetaItems.length === 0 ? (
+                              <tr>
+                                <td colSpan={6} className="py-8 text-center text-stone-500">
+                                  Este plato aún no tiene ingredientes agregados. Selecciona insumos abajo para armar la receta.
+                                </td>
+                              </tr>
+                            ) : (
+                              recetaItems.map((item) => {
+                                const ins = insumos.find((i) => i.InsumoId === item.InsumoId);
+                                const nombre = ins ? ins.Nombre : (item.InsumoNombre || 'Insumo');
+                                const cat = ins ? ins.Categoria : (item.InsumoCategoria || 'Insumos');
+                                const costoUnit = ins ? ins.CostoUnitario : (item.CostoUnitarioInsumo || 0);
+                                const subtotal = item.Cantidad * costoUnit;
+
+                                return (
+                                  <tr key={item.InsumoId} className="hover:bg-stone-800/40">
+                                    <td className="py-2.5 px-3 font-bold text-white">{nombre}</td>
+                                    <td className="py-2.5 px-3 text-stone-400 text-xs">{cat}</td>
+                                    <td className="py-2.5 px-3 text-center font-mono font-bold text-amber-300">
+                                      {item.Cantidad} {ins?.UnidadMedida || item.UnidadMedida}
+                                    </td>
+                                    <td className="py-2.5 px-3 text-right font-mono text-stone-400">
+                                      ${costoUnit.toFixed(2)}
+                                    </td>
+                                    <td className="py-2.5 px-3 text-right font-mono font-bold text-red-400">
+                                      ${subtotal.toFixed(2)}
+                                    </td>
+                                    <td className="py-2.5 px-3 text-center">
+                                      <button
+                                        onClick={() => handleRemoveIngrediente(item.InsumoId)}
+                                        className="p-1 rounded hover:bg-red-500/20 text-red-400 transition-colors cursor-pointer"
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                      </button>
+                                    </td>
+                                  </tr>
+                                );
+                              })
+                            )}
+                          </tbody>
+                          {recetaItems.length > 0 && (
+                            <tfoot className="bg-stone-950 font-black border-t border-stone-800 text-stone-200">
+                              <tr>
+                                <td colSpan={4} className="py-3 px-3 text-right uppercase text-xs">
+                                  Total Costo Materia Prima (Food Cost):
+                                </td>
+                                <td className="py-3 px-3 text-right text-red-400 font-mono text-base">
+                                  ${currentCalculatedFoodCost.toFixed(2)}
+                                </td>
+                                <td></td>
+                              </tr>
+                            </tfoot>
+                          )}
+                        </table>
+                      </div>
+
+                      {/* Add Ingredient Form Bar */}
+                      <div className="p-3.5 rounded-xl bg-stone-950 border border-stone-800 flex flex-col sm:flex-row items-center gap-3">
+                        {/* Select Insumo */}
+                        <select
+                          value={newIngredienteInsumoId}
+                          onChange={(e) => setNewIngredienteInsumoId(e.target.value ? Number(e.target.value) : '')}
+                          className="w-full sm:flex-1 bg-stone-900 border border-stone-700 rounded-xl px-3 py-2 text-xs sm:text-sm text-white focus:outline-none focus:border-amber-400"
+                        >
+                          <option value="">-- Seleccionar Insumo del Inventario --</option>
+                          {insumos.map((i) => (
+                            <option key={i.InsumoId} value={i.InsumoId}>
+                              {i.Nombre} ({i.Categoria}) - ${i.CostoUnitario.toFixed(2)} / {i.UnidadMedida}
+                            </option>
+                          ))}
+                        </select>
+
+                        {/* Quantity */}
+                        <div className="w-full sm:w-36 flex items-center space-x-2">
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0.01"
+                            placeholder="Cantidad"
+                            value={newIngredienteCantidad}
+                            onChange={(e) => setNewIngredienteCantidad(parseFloat(e.target.value) || 0)}
+                            className="w-full bg-stone-900 border border-stone-700 rounded-xl px-3 py-2 text-xs sm:text-sm text-white font-mono text-center focus:outline-none focus:border-amber-400"
+                          />
+                          <span className="text-xs text-stone-400 shrink-0">
+                            {newIngredienteInsumoId ? insumos.find((i) => i.InsumoId === Number(newIngredienteInsumoId))?.UnidadMedida : ''}
+                          </span>
+                        </div>
+
+                        {/* Add Button */}
+                        <button
+                          type="button"
+                          onClick={handleAddIngredienteToReceta}
+                          className="w-full sm:w-auto px-4 py-2 bg-amber-500 hover:bg-amber-400 text-stone-950 font-black text-xs sm:text-sm rounded-xl transition-all shadow cursor-pointer whitespace-nowrap"
+                        >
+                          + Añadir Insumo
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </>
               ) : (
                 <div className="bg-stone-900 border border-stone-800 rounded-2xl p-12 text-center text-stone-500">
@@ -2023,22 +2223,24 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
       {/* MODAL: CREAR / EDITAR INSUMO */}
       {/* ========================================================= */}
       {isInsumoModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-stone-900 border border-stone-800 rounded-3xl max-w-lg w-full p-6 shadow-2xl animate-in zoom-in-95 duration-200">
-            <div className="flex items-center justify-between pb-4 border-b border-stone-800">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
+          <div className="bg-stone-900 border border-stone-800 rounded-3xl max-w-xl w-full shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh] my-auto overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-stone-800 shrink-0 bg-stone-900 z-10">
               <h3 className="text-lg font-black text-white flex items-center gap-2">
                 <Package className="w-5 h-5 text-amber-400" />
                 <span>{editingInsumo ? 'Editar Insumo' : 'Nuevo Insumo de Inventario'}</span>
               </h3>
               <button
+                type="button"
                 onClick={() => setIsInsumoModalOpen(false)}
-                className="text-stone-400 hover:text-white p-1 rounded-lg"
+                className="text-stone-400 hover:text-white p-1 rounded-lg hover:bg-stone-800 transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveInsumo} className="space-y-4 mt-4">
+            <form onSubmit={handleSaveInsumo} className="flex flex-col flex-1 overflow-hidden min-h-0">
+              <div className="p-6 space-y-4 overflow-y-auto flex-1 min-h-0 overscroll-contain">
               {/* Nombre */}
               <div>
                 <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider mb-1">
@@ -2129,7 +2331,8 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
                     type="number"
                     step="0.01"
                     name="costoUnitario"
-                    defaultValue={editingInsumo?.CostoUnitario || 1.0}
+                    value={modalCostoUnitario}
+                    onChange={(e) => setModalCostoUnitario(safeParsePrice(e.target.value))}
                     required
                     className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3 py-2 text-sm text-white font-mono text-center focus:outline-none focus:border-amber-400"
                   />
@@ -2155,38 +2358,249 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
                 </select>
               </div>
 
-              {/* Es Venta Directa (Bebidas, etc.) */}
-              <div className="p-3 bg-stone-950 rounded-xl border border-stone-800 flex items-center justify-between">
+              {/* Es Venta Directa (Bebidas, snacks, etc.) */}
+              <div className="p-3.5 bg-stone-950 rounded-2xl border border-stone-800 flex items-center justify-between">
                 <div>
-                  <span className="text-xs font-bold text-white block">Es Producto de Venta Directa</span>
-                  <span className="text-[11px] text-stone-400 block">
-                    Activar para refrescos, maltas y bebidas terminadas vendidas directo sin preparación.
+                  <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <Package className="w-4 h-4 text-blue-400" />
+                    <span>Es Producto de Venta Directa</span>
+                  </span>
+                  <span className="text-[11px] text-stone-400 block mt-0.5">
+                    Activar para refrescos, maltas y productos terminados vendidos sin preparación culinaria.
                   </span>
                 </div>
                 <input
                   type="checkbox"
                   name="esVentaDirecta"
-                  value="true"
-                  defaultChecked={editingInsumo?.EsVentaDirecta || false}
-                  className="w-5 h-5 accent-amber-400 rounded cursor-pointer"
+                  checked={modalEsVentaDirecta}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setModalEsVentaDirecta(checked);
+                    if (checked && modalPrecioVenta <= 0) {
+                      setModalPrecioVenta(modalCostoUnitario > 0 ? Math.round(modalCostoUnitario / 0.5) : 2.0);
+                    }
+                  }}
+                  className="w-5 h-5 accent-blue-500 rounded cursor-pointer"
                 />
               </div>
 
-              {/* Buttons */}
-              <div className="flex items-center justify-end space-x-3 pt-4 border-t border-stone-800">
-                <button
-                  type="button"
-                  onClick={() => setIsInsumoModalOpen(false)}
-                  className="px-4 py-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 font-bold text-xs cursor-pointer"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-black text-xs sm:text-sm transition-all shadow cursor-pointer"
-                >
-                  {editingInsumo ? 'Actualizar Insumo' : 'Crear Insumo'}
-                </button>
+              {/* SECCIÓN INTERACTIVA: ESTRUCTURA DE COSTOS & MARGEN DE VENTA DIRECTA */}
+              {modalEsVentaDirecta && (
+                <div className="p-4 rounded-2xl bg-stone-950/90 border border-amber-500/40 space-y-4 shadow-inner animate-in fade-in duration-150">
+                  <div className="flex items-center justify-between pb-2 border-b border-stone-800">
+                    <div className="flex items-center gap-2">
+                      <div className="p-1.5 rounded-lg bg-amber-500/20 text-amber-400">
+                        <Calculator className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-black text-white uppercase tracking-wider">
+                          Estructura de Costos & Análisis de Margen
+                        </h4>
+                        <p className="text-[11px] text-stone-400">
+                          Establece el precio y margen del producto sin necesidad de crear una receta en cocina.
+                        </p>
+                      </div>
+                    </div>
+                    <span className="px-2 py-0.5 rounded-full bg-blue-500/20 border border-blue-500/40 text-blue-300 text-[10px] font-bold">
+                      Venta Directa
+                    </span>
+                  </div>
+
+                  {/* Input de Precio de Venta */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-bold text-stone-200 uppercase tracking-wider flex items-center gap-1.5">
+                        <DollarSign className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Precio de Venta al Público *</span>
+                      </label>
+                      <span className="text-[11px] text-stone-400 font-mono">
+                        {modalCostoUnitario > 0 ? `Costo base: $${modalCostoUnitario.toFixed(2)}` : 'Sin costo base'}
+                      </span>
+                    </div>
+                    <div className="relative">
+                      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-500 font-bold">$</span>
+                      <input
+                        type="number"
+                        step="any"
+                        min="0"
+                        value={modalPrecioVenta || ''}
+                        onChange={(e) => setModalPrecioVenta(safeParsePrice(e.target.value))}
+                        placeholder="0.00"
+                        className="w-full bg-stone-900 border border-amber-500/50 rounded-xl pl-8 pr-4 py-2.5 text-base font-bold font-mono text-amber-400 focus:outline-none focus:border-amber-400"
+                      />
+                    </div>
+                  </div>
+
+                  {/* KPI Matrix: Costo vs Venta vs Margen */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                    <div className="p-2.5 bg-stone-900 rounded-xl border border-stone-800 text-center">
+                      <span className="text-[10px] text-stone-400 uppercase font-bold block">Costo Compra</span>
+                      <span className="text-sm font-black font-mono text-stone-200">
+                        ${modalCostoUnitario.toFixed(2)}
+                      </span>
+                      <span className="text-[9px] text-stone-500 block font-mono">
+                        {modalPrecioVenta > 0 ? `${((modalCostoUnitario / modalPrecioVenta) * 100).toFixed(1)}%` : '0%'} costo
+                      </span>
+                    </div>
+
+                    <div className="p-2.5 bg-stone-900 rounded-xl border border-stone-800 text-center">
+                      <span className="text-[10px] text-stone-400 uppercase font-bold block">Margen Bruto</span>
+                      <span className={`text-sm font-black font-mono ${modalPrecioVenta - modalCostoUnitario >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                        ${(modalPrecioVenta - modalCostoUnitario).toFixed(2)}
+                      </span>
+                      <span className="text-[9px] text-stone-500 block">
+                        {modalPrecioVenta - modalCostoUnitario >= 0 ? 'ganancia neta' : 'pérdida unit.'}
+                      </span>
+                    </div>
+
+                    <div className="p-2.5 bg-stone-900 rounded-xl border border-stone-800 text-center">
+                      <span className="text-[10px] text-stone-400 uppercase font-bold block">Margen %</span>
+                      <span className={`text-sm font-black font-mono ${
+                        modalPrecioVenta > 0 && ((modalPrecioVenta - modalCostoUnitario) / modalPrecioVenta) >= 0.4
+                          ? 'text-emerald-400'
+                          : modalPrecioVenta > 0 && ((modalPrecioVenta - modalCostoUnitario) / modalPrecioVenta) >= 0.2
+                          ? 'text-amber-400'
+                          : 'text-red-400'
+                      }`}>
+                        {modalPrecioVenta > 0 ? `${(((modalPrecioVenta - modalCostoUnitario) / modalPrecioVenta) * 100).toFixed(1)}%` : '0%'}
+                      </span>
+                      <span className="text-[9px] text-stone-500 block">sobre venta</span>
+                    </div>
+
+                    <div className="p-2.5 bg-stone-900 rounded-xl border border-stone-800 text-center">
+                      <span className="text-[10px] text-stone-400 uppercase font-bold block">Markup %</span>
+                      <span className="text-sm font-black font-mono text-amber-400">
+                        {modalCostoUnitario > 0 && modalPrecioVenta > modalCostoUnitario
+                          ? `${(((modalPrecioVenta - modalCostoUnitario) / modalCostoUnitario) * 100).toFixed(0)}%`
+                          : '0%'}
+                      </span>
+                      <span className="text-[9px] text-stone-500 block">sobre costo</span>
+                    </div>
+                  </div>
+
+                  {/* Semáforo de Rentabilidad */}
+                  <div className="p-2.5 rounded-xl bg-stone-900 border border-stone-800 flex items-center justify-between text-xs">
+                    <span className="text-stone-400 font-medium">Diagnóstico Financiero:</span>
+                    {modalPrecioVenta <= 0 || modalPrecioVenta <= modalCostoUnitario ? (
+                      <span className="px-2 py-0.5 rounded-lg bg-red-500/20 text-red-300 font-bold text-[11px] border border-red-500/30">
+                        ⚠️ Sin margen o a pérdida
+                      </span>
+                    ) : ((modalPrecioVenta - modalCostoUnitario) / modalPrecioVenta) >= 0.6 ? (
+                      <span className="px-2 py-0.5 rounded-lg bg-emerald-500/20 text-emerald-300 font-bold text-[11px] border border-emerald-500/30">
+                        ✅ Margen Excelente (≥ 60%)
+                      </span>
+                    ) : ((modalPrecioVenta - modalCostoUnitario) / modalPrecioVenta) >= 0.4 ? (
+                      <span className="px-2 py-0.5 rounded-lg bg-blue-500/20 text-blue-300 font-bold text-[11px] border border-blue-500/30">
+                        👍 Margen Aceptable (40% - 59%)
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded-lg bg-amber-500/20 text-amber-300 font-bold text-[11px] border border-amber-500/30">
+                        ⚡ Margen Ajustado (&lt; 40%)
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Precios Sugeridos con 1-Click */}
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-amber-400">
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Precios Sugeridos por Margen Estándar Gastronómico:</span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setModalPrecioVenta(modalCostoUnitario > 0 ? Math.round(modalCostoUnitario / 0.60) : 0)}
+                        className="p-2 rounded-xl bg-stone-900 hover:bg-stone-800 border border-stone-800 text-left transition-all active:scale-95 cursor-pointer"
+                      >
+                        <span className="text-[10px] text-stone-400 block font-medium">40% Margen</span>
+                        <span className="text-xs font-bold text-stone-200 font-mono block">
+                          ${modalCostoUnitario > 0 ? Math.round(modalCostoUnitario / 0.60) : 0}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setModalPrecioVenta(modalCostoUnitario > 0 ? Math.round(modalCostoUnitario / 0.50) : 0)}
+                        className="p-2 rounded-xl bg-stone-900 hover:bg-stone-800 border border-stone-800 text-left transition-all active:scale-95 cursor-pointer"
+                      >
+                        <span className="text-[10px] text-stone-400 block font-medium">50% Margen</span>
+                        <span className="text-xs font-bold text-stone-200 font-mono block">
+                          ${modalCostoUnitario > 0 ? Math.round(modalCostoUnitario / 0.50) : 0}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setModalPrecioVenta(modalCostoUnitario > 0 ? Math.round(modalCostoUnitario / 0.40) : 0)}
+                        className="p-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/50 text-left transition-all active:scale-95 cursor-pointer"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] text-amber-300 font-bold block">60% Margen</span>
+                          <span className="text-[8px] px-1 rounded bg-amber-500 text-stone-950 font-black">TOP</span>
+                        </div>
+                        <span className="text-xs font-black text-amber-400 font-mono block">
+                          ${modalCostoUnitario > 0 ? Math.round(modalCostoUnitario / 0.40) : 0}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setModalPrecioVenta(modalCostoUnitario > 0 ? Math.round(modalCostoUnitario / 0.30) : 0)}
+                        className="p-2 rounded-xl bg-stone-900 hover:bg-stone-800 border border-stone-800 text-left transition-all active:scale-95 cursor-pointer"
+                      >
+                        <span className="text-[10px] text-stone-400 block font-medium">70% Margen</span>
+                        <span className="text-xs font-bold text-stone-200 font-mono block">
+                          ${modalCostoUnitario > 0 ? Math.round(modalCostoUnitario / 0.30) : 0}
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Checkbox Sincronizar con POS y Carta */}
+                  <label className="flex items-center gap-2.5 p-2.5 rounded-xl bg-stone-900/80 border border-stone-800 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={modalSyncPlato}
+                      onChange={(e) => setModalSyncPlato(e.target.checked)}
+                      className="w-4 h-4 accent-amber-400 rounded cursor-pointer"
+                    />
+                    <span className="text-xs text-stone-300 font-medium select-none">
+                      Publicar / sincronizar automáticamente en la Carta de Platos del POS y Menú Digital
+                    </span>
+                  </label>
+                </div>
+              )}
+              </div>
+
+              {/* Sticky Footer Actions */}
+              <div className="px-6 py-4 border-t border-stone-800 bg-stone-950/95 backdrop-blur-xs shrink-0 flex flex-col sm:flex-row items-center justify-between gap-3 z-10">
+                <div className="text-xs text-stone-400">
+                  {modalEsVentaDirecta && modalPrecioVenta > 0 ? (
+                    <span className="font-mono text-emerald-400 font-bold text-xs">
+                      Venta: ${modalPrecioVenta.toLocaleString()} · Margen: {(((modalPrecioVenta - modalCostoUnitario) / modalPrecioVenta) * 100).toFixed(0)}%
+                    </span>
+                  ) : (
+                    <span className="text-[11px] text-stone-500">
+                      {editingInsumo ? 'Modificando insumo existente' : 'Registrando nuevo insumo'}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center space-x-3 w-full sm:w-auto justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setIsInsumoModalOpen(false)}
+                    className="px-4 py-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 font-bold text-xs cursor-pointer transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-black text-xs sm:text-sm transition-all shadow-lg active:scale-95 cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Save className="w-4 h-4" />
+                    <span>{editingInsumo ? 'Actualizar Insumo' : 'Guardar Insumo'}</span>
+                  </button>
+                </div>
               </div>
             </form>
           </div>
@@ -2197,9 +2611,9 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
       {/* MODAL: ENTRADA / COMPRA DE STOCK */}
       {/* ========================================================= */}
       {isEntradaModalOpen && selectedInsumoForEntrada && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-stone-900 border border-stone-800 rounded-3xl max-w-md w-full p-6 shadow-2xl animate-in zoom-in-95 duration-200">
-            <div className="flex items-center justify-between pb-4 border-b border-stone-800">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
+          <div className="bg-stone-900 border border-stone-800 rounded-3xl max-w-md w-full shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh] my-auto overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-stone-800 shrink-0 bg-stone-900">
               <div>
                 <span className="text-[10px] uppercase font-bold text-emerald-400 tracking-wider">
                   Ingreso de Mercancía
@@ -2209,73 +2623,76 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
                 </h3>
               </div>
               <button
+                type="button"
                 onClick={() => setIsEntradaModalOpen(false)}
-                className="text-stone-400 hover:text-white p-1 rounded-lg"
+                className="text-stone-400 hover:text-white p-1 rounded-lg hover:bg-stone-800 transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleConfirmEntrada} className="space-y-4 mt-4">
-              <div className="p-3 bg-stone-950 rounded-xl border border-stone-800 flex justify-between items-center text-xs">
-                <span className="text-stone-400">Stock Actual en Sistema:</span>
-                <span className="font-mono font-bold text-white text-sm">
-                  {selectedInsumoForEntrada.StockActual} {selectedInsumoForEntrada.UnidadMedida}
-                </span>
+            <form onSubmit={handleConfirmEntrada} className="flex flex-col flex-1 overflow-hidden min-h-0">
+              <div className="p-6 space-y-4 overflow-y-auto flex-1 min-h-0 overscroll-contain">
+                <div className="p-3 bg-stone-950 rounded-xl border border-stone-800 flex justify-between items-center text-xs">
+                  <span className="text-stone-400">Stock Actual en Sistema:</span>
+                  <span className="font-mono font-bold text-white text-sm">
+                    {selectedInsumoForEntrada.StockActual} {selectedInsumoForEntrada.UnidadMedida}
+                  </span>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider mb-1">
+                    Cantidad a Ingresar ({selectedInsumoForEntrada.UnidadMedida}) *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    value={entradaCantidad}
+                    onChange={(e) => setEntradaCantidad(parseFloat(e.target.value) || 0)}
+                    required
+                    className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3.5 py-2.5 text-base text-white font-mono text-center focus:outline-none focus:border-emerald-400"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider mb-1">
+                    Nuevo Costo Unitario ($) (Opcional si varió)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={entradaCosto}
+                    onChange={(e) => setEntradaCosto(parseFloat(e.target.value) || 0)}
+                    className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3.5 py-2 text-sm text-white font-mono text-center focus:outline-none focus:border-emerald-400"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider mb-1">
+                    N° Factura / Referencia de Compra
+                  </label>
+                  <input
+                    type="text"
+                    value={entradaReferencia}
+                    onChange={(e) => setEntradaReferencia(e.target.value)}
+                    placeholder="ej: Factura #9821, Proveedor Polar"
+                    className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-emerald-400"
+                  />
+                </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider mb-1">
-                  Cantidad a Ingresar ({selectedInsumoForEntrada.UnidadMedida}) *
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0.01"
-                  value={entradaCantidad}
-                  onChange={(e) => setEntradaCantidad(parseFloat(e.target.value) || 0)}
-                  required
-                  className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3.5 py-2.5 text-base text-white font-mono text-center focus:outline-none focus:border-emerald-400"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider mb-1">
-                  Nuevo Costo Unitario ($) (Opcional si varió)
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={entradaCosto}
-                  onChange={(e) => setEntradaCosto(parseFloat(e.target.value) || 0)}
-                  className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3.5 py-2 text-sm text-white font-mono text-center focus:outline-none focus:border-emerald-400"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider mb-1">
-                  N° Factura / Referencia de Compra
-                </label>
-                <input
-                  type="text"
-                  value={entradaReferencia}
-                  onChange={(e) => setEntradaReferencia(e.target.value)}
-                  placeholder="ej: Factura #9821, Proveedor Polar"
-                  className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-emerald-400"
-                />
-              </div>
-
-              <div className="flex items-center justify-end space-x-3 pt-4 border-t border-stone-800">
+              <div className="px-6 py-4 border-t border-stone-800 bg-stone-950/95 backdrop-blur-xs shrink-0 flex items-center justify-end space-x-3">
                 <button
                   type="button"
                   onClick={() => setIsEntradaModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 font-bold text-xs"
+                  className="px-4 py-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 font-bold text-xs cursor-pointer transition-colors"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs sm:text-sm transition-all shadow cursor-pointer"
+                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs sm:text-sm transition-all shadow cursor-pointer active:scale-95"
                 >
                   Confirmar Entrada
                 </button>
@@ -2289,9 +2706,9 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
       {/* MODAL: AJUSTE MANUAL DE STOCK / MERMA */}
       {/* ========================================================= */}
       {isAjusteModalOpen && selectedInsumoForAjuste && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-stone-900 border border-stone-800 rounded-3xl max-w-md w-full p-6 shadow-2xl animate-in zoom-in-95 duration-200">
-            <div className="flex items-center justify-between pb-4 border-b border-stone-800">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
+          <div className="bg-stone-900 border border-stone-800 rounded-3xl max-w-md w-full shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh] my-auto overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-stone-800 shrink-0 bg-stone-900">
               <div>
                 <span className="text-[10px] uppercase font-bold text-amber-400 tracking-wider">
                   Inventario Físico
@@ -2301,58 +2718,61 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
                 </h3>
               </div>
               <button
+                type="button"
                 onClick={() => setIsAjusteModalOpen(false)}
-                className="text-stone-400 hover:text-white p-1 rounded-lg"
+                className="text-stone-400 hover:text-white p-1 rounded-lg hover:bg-stone-800 transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleConfirmAjuste} className="space-y-4 mt-4">
-              <div className="p-3 bg-stone-950 rounded-xl border border-stone-800 flex justify-between items-center text-xs">
-                <span className="text-stone-400">Stock Actual:</span>
-                <span className="font-mono font-bold text-white text-sm">
-                  {selectedInsumoForAjuste.StockActual} {selectedInsumoForAjuste.UnidadMedida}
-                </span>
+            <form onSubmit={handleConfirmAjuste} className="flex flex-col flex-1 overflow-hidden min-h-0">
+              <div className="p-6 space-y-4 overflow-y-auto flex-1 min-h-0 overscroll-contain">
+                <div className="p-3 bg-stone-950 rounded-xl border border-stone-800 flex justify-between items-center text-xs">
+                  <span className="text-stone-400">Stock Actual:</span>
+                  <span className="font-mono font-bold text-white text-sm">
+                    {selectedInsumoForAjuste.StockActual} {selectedInsumoForAjuste.UnidadMedida}
+                  </span>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider mb-1">
+                    Nuevo Stock Real ({selectedInsumoForAjuste.UnidadMedida}) *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={ajusteNuevoStock}
+                    onChange={(e) => setAjusteNuevoStock(parseFloat(e.target.value) || 0)}
+                    required
+                    className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3.5 py-2.5 text-base text-white font-mono text-center focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider mb-1">
+                    Motivo del Ajuste (Merma, conteo físico, caducidad, etc.)
+                  </label>
+                  <textarea
+                    value={ajusteMotivo}
+                    onChange={(e) => setAjusteMotivo(e.target.value)}
+                    placeholder="ej: Conteo físico mensual, merma por quema o caducidad"
+                    className="w-full bg-stone-950 border border-stone-800 rounded-xl p-3 text-xs sm:text-sm text-white focus:outline-none focus:border-amber-400 h-20 resize-none"
+                  />
+                </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider mb-1">
-                  Nuevo Stock Real ({selectedInsumoForAjuste.UnidadMedida}) *
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={ajusteNuevoStock}
-                  onChange={(e) => setAjusteNuevoStock(parseFloat(e.target.value) || 0)}
-                  required
-                  className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3.5 py-2.5 text-base text-white font-mono text-center focus:outline-none focus:border-amber-400"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider mb-1">
-                  Motivo del Ajuste (Merma, conteo físico, caducidad, etc.)
-                </label>
-                <textarea
-                  value={ajusteMotivo}
-                  onChange={(e) => setAjusteMotivo(e.target.value)}
-                  placeholder="ej: Conteo físico mensual, merma por quema o caducidad"
-                  className="w-full bg-stone-950 border border-stone-800 rounded-xl p-3 text-xs sm:text-sm text-white focus:outline-none focus:border-amber-400 h-20 resize-none"
-                />
-              </div>
-
-              <div className="flex items-center justify-end space-x-3 pt-4 border-t border-stone-800">
+              <div className="px-6 py-4 border-t border-stone-800 bg-stone-950/95 backdrop-blur-xs shrink-0 flex items-center justify-end space-x-3">
                 <button
                   type="button"
                   onClick={() => setIsAjusteModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 font-bold text-xs"
+                  className="px-4 py-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 font-bold text-xs cursor-pointer transition-colors"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-black text-xs sm:text-sm transition-all shadow cursor-pointer"
+                  className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-black text-xs sm:text-sm transition-all shadow cursor-pointer active:scale-95"
                 >
                   Guardar Ajuste
                 </button>
@@ -2366,116 +2786,119 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
       {/* MODAL: PROVEEDOR */}
       {/* ========================================================= */}
       {isProveedorModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-stone-900 border border-stone-800 rounded-3xl max-w-lg w-full p-6 shadow-2xl animate-in zoom-in-95 duration-200">
-            <div className="flex items-center justify-between pb-4 border-b border-stone-800">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
+          <div className="bg-stone-900 border border-stone-800 rounded-3xl max-w-lg w-full shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh] my-auto overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-stone-800 shrink-0 bg-stone-900">
               <h3 className="text-lg font-black text-white flex items-center gap-2">
                 <Truck className="w-5 h-5 text-amber-400" />
                 <span>{editingProveedor ? 'Editar Proveedor' : 'Nuevo Proveedor'}</span>
               </h3>
               <button
+                type="button"
                 onClick={() => setIsProveedorModalOpen(false)}
-                className="text-stone-400 hover:text-white p-1 rounded-lg"
+                className="text-stone-400 hover:text-white p-1 rounded-lg hover:bg-stone-800 transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveProveedor} className="space-y-4 mt-4">
-              <div>
-                <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider mb-1">
-                  Nombre de la Empresa o Distribuidor *
-                </label>
-                <input
-                  type="text"
-                  name="nombre"
-                  defaultValue={editingProveedor?.Nombre || ''}
-                  required
-                  placeholder="ej: Distribuidora Avícola Los Llanos"
-                  className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-amber-400"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
+            <form onSubmit={handleSaveProveedor} className="flex flex-col flex-1 overflow-hidden min-h-0">
+              <div className="p-6 space-y-4 overflow-y-auto flex-1 min-h-0 overscroll-contain">
                 <div>
                   <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider mb-1">
-                    RIF o C.I.
+                    Nombre de la Empresa o Distribuidor *
                   </label>
                   <input
                     type="text"
-                    name="rif"
-                    defaultValue={editingProveedor?.Rif || ''}
-                    placeholder="J-12345678-9"
-                    className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-amber-400"
+                    name="nombre"
+                    defaultValue={editingProveedor?.Nombre || ''}
+                    required
+                    placeholder="ej: Distribuidora Avícola Los Llanos"
+                    className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-amber-400"
                   />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider mb-1">
+                      RIF o C.I.
+                    </label>
+                    <input
+                      type="text"
+                      name="rif"
+                      defaultValue={editingProveedor?.Rif || ''}
+                      placeholder="J-12345678-9"
+                      className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-amber-400"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider mb-1">
+                      Teléfono / WhatsApp
+                    </label>
+                    <input
+                      type="text"
+                      name="telefono"
+                      defaultValue={editingProveedor?.Telefono || ''}
+                      placeholder="+584121234567"
+                      className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-amber-400"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider mb-1">
+                      Persona de Contacto
+                    </label>
+                    <input
+                      type="text"
+                      name="contacto"
+                      defaultValue={editingProveedor?.Contacto || ''}
+                      placeholder="ej: Carlos Pérez"
+                      className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-400"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider mb-1">
+                      Días de Entrega / Despacho
+                    </label>
+                    <input
+                      type="text"
+                      name="diasEntrega"
+                      defaultValue={editingProveedor?.DiasEntrega || ''}
+                      placeholder="ej: Martes y Jueves"
+                      className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-400"
+                    />
+                  </div>
                 </div>
 
                 <div>
                   <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider mb-1">
-                    Teléfono / WhatsApp
+                    Categorías de Insumos Suministrados
                   </label>
                   <input
                     type="text"
-                    name="telefono"
-                    defaultValue={editingProveedor?.Telefono || ''}
-                    placeholder="+584121234567"
-                    className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-amber-400"
+                    name="categorias"
+                    defaultValue={editingProveedor?.CategoriasSuministro || ''}
+                    placeholder="ej: Pollo fresco, carnes, alas, pechugas"
+                    className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-amber-400"
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider mb-1">
-                    Persona de Contacto
-                  </label>
-                  <input
-                    type="text"
-                    name="contacto"
-                    defaultValue={editingProveedor?.Contacto || ''}
-                    placeholder="ej: Carlos Pérez"
-                    className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-400"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider mb-1">
-                    Días de Entrega / Despacho
-                  </label>
-                  <input
-                    type="text"
-                    name="diasEntrega"
-                    defaultValue={editingProveedor?.DiasEntrega || ''}
-                    placeholder="ej: Martes y Jueves"
-                    className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-400"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider mb-1">
-                  Categorías de Insumos Suministrados
-                </label>
-                <input
-                  type="text"
-                  name="categorias"
-                  defaultValue={editingProveedor?.CategoriasSuministro || ''}
-                  placeholder="ej: Pollo fresco, carnes, alas, pechugas"
-                  className="w-full bg-stone-950 border border-stone-800 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-amber-400"
-                />
-              </div>
-
-              <div className="flex items-center justify-end space-x-3 pt-4 border-t border-stone-800">
+              <div className="px-6 py-4 border-t border-stone-800 bg-stone-950/95 backdrop-blur-xs shrink-0 flex items-center justify-end space-x-3">
                 <button
                   type="button"
                   onClick={() => setIsProveedorModalOpen(false)}
-                  className="px-4 py-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 font-bold text-xs"
+                  className="px-4 py-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 font-bold text-xs cursor-pointer transition-colors"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-black text-xs sm:text-sm transition-all shadow cursor-pointer"
+                  className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-black text-xs sm:text-sm transition-all shadow cursor-pointer active:scale-95"
                 >
                   {editingProveedor ? 'Actualizar Proveedor' : 'Guardar Proveedor'}
                 </button>

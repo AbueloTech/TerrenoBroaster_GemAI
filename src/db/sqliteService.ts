@@ -427,6 +427,7 @@ class SQLiteService {
         StockActual REAL NOT NULL DEFAULT 0,
         StockMinimo REAL NOT NULL DEFAULT 0,
         CostoUnitario REAL NOT NULL DEFAULT 0,
+        PrecioVenta REAL DEFAULT 0,
         ProveedorId INTEGER,
         EsVentaDirecta INTEGER DEFAULT 0,
         PlatoId INTEGER,
@@ -549,6 +550,23 @@ class SQLiteService {
         END
         WHERE Descripcion IS NULL OR TRIM(Descripcion) = '';
       `);
+    } catch {
+      // ignore
+    }
+
+    // Schema self-healing: Ensure PrecioVenta column exists in Insumos table
+    try {
+      const pragmaInsumos = this.db.exec("PRAGMA table_info(Insumos);");
+      if (pragmaInsumos.length > 0 && pragmaInsumos[0].values) {
+        const colNames = pragmaInsumos[0].values.map((v: any) => String(v[1]).toLowerCase());
+        if (!colNames.includes('precioventa')) {
+          try {
+            this.db.run("ALTER TABLE Insumos ADD COLUMN PrecioVenta REAL DEFAULT 0;");
+          } catch {
+            // ignore
+          }
+        }
+      }
     } catch {
       // ignore
     }
@@ -2660,7 +2678,7 @@ class SQLiteService {
     }
     try {
       const res = this.db.exec(`
-        SELECT i.InsumoId, i.Nombre, i.Categoria, i.UnidadMedida, i.StockActual, i.StockMinimo, i.CostoUnitario, i.ProveedorId, i.EsVentaDirecta, i.PlatoId, i.UltimaActualizacion, p.Nombre as ProveedorNombre
+        SELECT i.InsumoId, i.Nombre, i.Categoria, i.UnidadMedida, i.StockActual, i.StockMinimo, i.CostoUnitario, i.PrecioVenta, i.ProveedorId, i.EsVentaDirecta, i.PlatoId, i.UltimaActualizacion, p.Nombre as ProveedorNombre
         FROM Insumos i
         LEFT JOIN Proveedores p ON i.ProveedorId = p.ProveedorId
         ORDER BY i.Categoria ASC, i.Nombre ASC
@@ -2678,6 +2696,7 @@ class SQLiteService {
           StockActual: Number(item.StockActual) || 0,
           StockMinimo: Number(item.StockMinimo) || 0,
           CostoUnitario: Number(item.CostoUnitario) || 0,
+          PrecioVenta: item.PrecioVenta != null && Number(item.PrecioVenta) > 0 ? Number(item.PrecioVenta) : undefined,
           ProveedorId: item.ProveedorId ? Number(item.ProveedorId) : undefined,
           ProveedorNombre: item.ProveedorNombre ? String(item.ProveedorNombre) : undefined,
           EsVentaDirecta: Boolean(item.EsVentaDirecta),
@@ -2696,10 +2715,11 @@ class SQLiteService {
     const cleanStock = Number(data.StockActual) || 0;
     const cleanMin = Number(data.StockMinimo) || 0;
     const cleanCost = safeParsePrice(data.CostoUnitario);
+    const cleanPrice = data.PrecioVenta ? safeParsePrice(data.PrecioVenta) : 0;
 
     if (this.db) {
       const stmt = this.db.prepare(
-        'INSERT INTO Insumos (Nombre, Categoria, UnidadMedida, StockActual, StockMinimo, CostoUnitario, ProveedorId, EsVentaDirecta, PlatoId, UltimaActualizacion) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO Insumos (Nombre, Categoria, UnidadMedida, StockActual, StockMinimo, CostoUnitario, PrecioVenta, ProveedorId, EsVentaDirecta, PlatoId, UltimaActualizacion) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
       );
       stmt.run([
         data.Nombre.trim(),
@@ -2708,6 +2728,7 @@ class SQLiteService {
         cleanStock,
         cleanMin,
         cleanCost,
+        cleanPrice,
         data.ProveedorId || null,
         data.EsVentaDirecta ? 1 : 0,
         data.PlatoId || null,
@@ -2741,6 +2762,7 @@ class SQLiteService {
         StockActual: cleanStock,
         StockMinimo: cleanMin,
         CostoUnitario: cleanCost,
+        PrecioVenta: cleanPrice > 0 ? cleanPrice : undefined,
         ProveedorId: data.ProveedorId,
         EsVentaDirecta: data.EsVentaDirecta,
         PlatoId: data.PlatoId,
@@ -2761,6 +2783,7 @@ class SQLiteService {
         StockActual: cleanStock,
         StockMinimo: cleanMin,
         CostoUnitario: cleanCost,
+        PrecioVenta: cleanPrice > 0 ? cleanPrice : undefined,
         ProveedorId: data.ProveedorId,
         EsVentaDirecta: data.EsVentaDirecta,
         PlatoId: data.PlatoId,
@@ -2778,10 +2801,11 @@ class SQLiteService {
     const cleanCost = safeParsePrice(insumo.CostoUnitario);
     const cleanStock = Number(insumo.StockActual) || 0;
     const cleanMin = Number(insumo.StockMinimo) || 0;
+    const cleanPrice = insumo.PrecioVenta ? safeParsePrice(insumo.PrecioVenta) : 0;
 
     if (this.db) {
       const stmt = this.db.prepare(
-        'UPDATE Insumos SET Nombre = ?, Categoria = ?, UnidadMedida = ?, StockActual = ?, StockMinimo = ?, CostoUnitario = ?, ProveedorId = ?, EsVentaDirecta = ?, PlatoId = ?, UltimaActualizacion = ? WHERE InsumoId = ?'
+        'UPDATE Insumos SET Nombre = ?, Categoria = ?, UnidadMedida = ?, StockActual = ?, StockMinimo = ?, CostoUnitario = ?, PrecioVenta = ?, ProveedorId = ?, EsVentaDirecta = ?, PlatoId = ?, UltimaActualizacion = ? WHERE InsumoId = ?'
       );
       stmt.run([
         insumo.Nombre.trim(),
@@ -2790,6 +2814,7 @@ class SQLiteService {
         cleanStock,
         cleanMin,
         cleanCost,
+        cleanPrice,
         insumo.ProveedorId || null,
         insumo.EsVentaDirecta ? 1 : 0,
         insumo.PlatoId || null,
@@ -2801,7 +2826,14 @@ class SQLiteService {
 
     const idx = this.fallbackInsumos.findIndex((i) => i.InsumoId === insumo.InsumoId);
     if (idx !== -1) {
-      this.fallbackInsumos[idx] = { ...insumo, CostoUnitario: cleanCost, StockActual: cleanStock, StockMinimo: cleanMin, UltimaActualizacion: now };
+      this.fallbackInsumos[idx] = {
+        ...insumo,
+        CostoUnitario: cleanCost,
+        StockActual: cleanStock,
+        StockMinimo: cleanMin,
+        PrecioVenta: cleanPrice > 0 ? cleanPrice : undefined,
+        UltimaActualizacion: now,
+      };
     }
 
     this.notify();
@@ -3088,13 +3120,47 @@ class SQLiteService {
 
   /**
    * Generates a complete Escandallo (cost & profit structure) for every dish in the restaurant.
+   * Seamlessly integrates both kitchen recipes and direct-sale items without requiring artificial 1-ingredient recipes.
    */
   public getPlatosEscandallos(): PlatoEscandallo[] {
     const platos = this.getPlatos();
     const allRecetas = this.getRecetas();
+    const allInsumos = this.getInsumos();
 
     return platos.map((plato) => {
-      const ingredientes = allRecetas.filter((r) => r.PlatoId === plato.ID);
+      let ingredientes = allRecetas.filter((r) => r.PlatoId === plato.ID);
+      let isDirectSale = false;
+      let matchedInsumo: Insumo | undefined;
+
+      // If no culinary recipe exists, check if this dish is linked to or represents a direct sale insumo
+      if (ingredientes.length === 0) {
+        matchedInsumo = allInsumos.find(
+          (ins) =>
+            ins.EsVentaDirecta &&
+            (ins.PlatoId === plato.ID ||
+              ins.Nombre.trim().toLowerCase() === plato.Plato.trim().toLowerCase())
+        );
+
+        if (matchedInsumo) {
+          isDirectSale = true;
+          // Generate a synthetic recipe item representing the direct sale product
+          ingredientes = [
+            {
+              RecetaId: -matchedInsumo.InsumoId,
+              PlatoId: plato.ID,
+              InsumoId: matchedInsumo.InsumoId,
+              Cantidad: 1,
+              UnidadMedida: matchedInsumo.UnidadMedida,
+              Notas: 'Producto de Venta Directa (Sin preparación / Costo de adquisición directo)',
+              InsumoNombre: matchedInsumo.Nombre,
+              InsumoCategoria: matchedInsumo.Categoria,
+              CostoUnitarioInsumo: matchedInsumo.CostoUnitario,
+              CostoPorPorcion: matchedInsumo.CostoUnitario,
+            },
+          ];
+        }
+      }
+
       const costoTotalInsumos = ingredientes.reduce((acc, curr) => acc + (curr.CostoPorPorcion || 0), 0);
       const precioVenta = safeParsePrice(plato.Precio);
       const margenBruto = precioVenta - costoTotalInsumos;
@@ -3124,8 +3190,87 @@ class SQLiteService {
         PrecioSugeridoMargen50: precioSugeridoMargen50,
         PrecioSugeridoMargen70: precioSugeridoMargen70,
         TieneReceta: ingredientes.length > 0,
+        EsVentaDirecta: isDirectSale,
+        InsumoId: matchedInsumo?.InsumoId,
       };
     });
+  }
+
+  /**
+   * Synchronizes a direct-sale Insumo with the Platos catalog in SQLite.
+   * If a Plato exists with matching ID or name, updates its price and name.
+   * If not, automatically creates a new Plato with appetizing default description.
+   */
+  public syncDirectSalePlato(
+    insumoId: number,
+    nombre: string,
+    precioVenta: number,
+    categoriaInsumo: string
+  ): number | undefined {
+    const cleanPrice = safeParsePrice(precioVenta);
+    if (cleanPrice <= 0) return undefined;
+
+    const platos = this.getPlatos();
+    const insumos = this.getInsumos();
+    const insumo = insumos.find((i) => i.InsumoId === insumoId);
+
+    let targetPlato: Plato | undefined;
+    if (insumo?.PlatoId) {
+      targetPlato = platos.find((p) => p.ID === insumo.PlatoId);
+    }
+    if (!targetPlato) {
+      targetPlato = platos.find(
+        (p) => p.Plato.trim().toLowerCase() === nombre.trim().toLowerCase()
+      );
+    }
+
+    // Determine appropriate POS menu category
+    let posCategoria = 'Bebidas';
+    const catLower = categoriaInsumo.toLowerCase();
+    if (catLower.includes('bebida') || catLower.includes('refresco')) {
+      posCategoria = 'Bebidas';
+    } else if (catLower.includes('pollo') || catLower.includes('carne')) {
+      posCategoria = 'Pollo';
+    } else if (catLower.includes('panad') || catLower.includes('harina')) {
+      posCategoria = 'Combos';
+    } else {
+      posCategoria = 'Bebidas';
+    }
+
+    if (targetPlato) {
+      this.updatePlato({
+        ...targetPlato,
+        Plato: nombre.trim(),
+        Precio: cleanPrice,
+      });
+
+      if (insumo && (insumo.PlatoId !== targetPlato.ID || insumo.PrecioVenta !== cleanPrice)) {
+        this.updateInsumo({
+          ...insumo,
+          PlatoId: targetPlato.ID,
+          PrecioVenta: cleanPrice,
+        });
+      }
+      return targetPlato.ID;
+    } else {
+      const defaultImg = posCategoria === 'Bebidas' ? 'bebida_general.jpg' : 'combo_personal.jpg';
+      const createdPlato = this.addPlato({
+        Plato: nombre.trim(),
+        Precio: cleanPrice,
+        Categoria: posCategoria,
+        Imagen: defaultImg,
+        Descripcion: `Producto de venta directa listo para consumo inmediato (${nombre.trim()}).`,
+      });
+
+      if (insumo) {
+        this.updateInsumo({
+          ...insumo,
+          PlatoId: createdPlato.ID,
+          PrecioVenta: cleanPrice,
+        });
+      }
+      return createdPlato.ID;
+    }
   }
 
   // ==========================================
