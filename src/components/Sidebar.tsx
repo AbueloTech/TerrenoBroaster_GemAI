@@ -27,6 +27,7 @@ import {
   Calculator,
   Sun,
   Moon,
+  Film,
 } from 'lucide-react';
 import { NavTab } from './Navbar';
 import { Usuario } from '../types';
@@ -44,6 +45,7 @@ interface SidebarProps {
   onOpenImageModal: () => void;
   onOpenWhatsAppModal: () => void;
   onOpenCierreCajaModal?: () => void;
+  onOpenVideoTutorialModal?: () => void;
   onOpenAlertSettingsModal?: () => void;
   onOpenCustomerMenu?: () => void;
   onOpenQrModal?: () => void;
@@ -71,6 +73,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenImageModal,
   onOpenWhatsAppModal,
   onOpenCierreCajaModal,
+  onOpenVideoTutorialModal,
   onOpenAlertSettingsModal,
   onOpenCustomerMenu,
   onOpenQrModal,
@@ -462,6 +465,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     {isExpanded && <span className="truncate text-stone-800 font-bold">Modo Oscuro (Noche)</span>}
                   </>
                 )}
+              </button>
+            )}
+
+            {/* 4.4 Demo y Video Tutorial Interactivo */}
+            {onOpenVideoTutorialModal && (
+              <button
+                onClick={() => handleActionClick(onOpenVideoTutorialModal)}
+                title="Demostración y Tutorial en Video Animado / Presentación PowerPoint"
+                className="w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl text-xs sm:text-sm font-bold text-purple-300 bg-purple-950/40 hover:bg-purple-950/70 border border-purple-500/30 hover:border-purple-500/60 transition-all group cursor-pointer shadow-sm"
+              >
+                <Film className="w-5 h-5 text-purple-400 shrink-0 group-hover:scale-110 transition-transform" />
+                {isExpanded && <span className="truncate">Demo & Video Tutorial</span>}
               </button>
             )}
 

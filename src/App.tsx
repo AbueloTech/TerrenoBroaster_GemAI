@@ -22,6 +22,7 @@ import { AlertSettingsModal } from './components/AlertSettingsModal';
 import { KitchenTicketModal } from './components/KitchenTicketModal';
 import { CustomerMenuView } from './components/CustomerMenuView';
 import { CierreCajaModal } from './components/CierreCajaModal';
+import { VideoTutorialModal } from './components/VideoTutorialModal';
 import { menuSyncService } from './services/menuSyncService';
 import { playWhatsAppIncomingAlert, playNotificationSound } from './utils/soundAlert';
 import { formatCurrency } from './utils/currency';
@@ -131,6 +132,7 @@ export default function App() {
   const [isAlertSettingsModalOpen, setIsAlertSettingsModalOpen] = useState(false);
   const [isDirectQrModalOpen, setIsDirectQrModalOpen] = useState(false);
   const [isCierreCajaModalOpen, setIsCierreCajaModalOpen] = useState(false);
+  const [isVideoTutorialModalOpen, setIsVideoTutorialModalOpen] = useState(false);
 
   // Completed sale ticket modal
   const [latestSaleTicket, setLatestSaleTicket] = useState<Venta | null>(null);
@@ -437,6 +439,7 @@ export default function App() {
         onOpenQrModal={() => setIsDirectQrModalOpen(true)}
         onOpenWhatsAppModal={() => setIsWhatsAppModalOpen(true)}
         onOpenCierreCajaModal={handleOpenCierreCaja}
+        onOpenVideoTutorialModal={() => setIsVideoTutorialModalOpen(true)}
         onOpenLoginModal={() => setIsLoginModalOpen(true)}
         onLogout={handleLogout}
         currentUser={currentUser}
@@ -466,6 +469,7 @@ export default function App() {
           onOpenImageModal={() => setIsImageModalOpen(true)}
           onOpenWhatsAppModal={() => setIsWhatsAppModalOpen(true)}
           onOpenCierreCajaModal={handleOpenCierreCaja}
+          onOpenVideoTutorialModal={() => setIsVideoTutorialModalOpen(true)}
           onOpenAlertSettingsModal={() => setIsAlertSettingsModalOpen(true)}
           onOpenCustomerMenu={() => window.open('/cliente', '_blank')}
           onOpenQrModal={() => setIsDirectQrModalOpen(true)}
@@ -816,6 +820,12 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Interactive Video Demonstration & Animated PowerPoint Tutorial Modal */}
+      <VideoTutorialModal
+        isOpen={isVideoTutorialModalOpen}
+        onClose={() => setIsVideoTutorialModalOpen(false)}
+      />
 
     </div>
   );

@@ -14,6 +14,7 @@ import {
   Calculator,
   Sun,
   Moon,
+  Film,
 } from 'lucide-react';
 import { Usuario } from '../types';
 import { BrandLogo } from './BrandLogo';
@@ -29,6 +30,7 @@ interface NavbarProps {
   onOpenQrModal?: () => void;
   onOpenWhatsAppModal?: () => void;
   onOpenCierreCajaModal?: () => void;
+  onOpenVideoTutorialModal?: () => void;
   onOpenLoginModal?: () => void;
   onLogout?: () => void;
   currentUser?: Usuario | null;
@@ -55,6 +57,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenQrModal,
   onOpenWhatsAppModal,
   onOpenCierreCajaModal,
+  onOpenVideoTutorialModal,
   onOpenLoginModal,
   onLogout,
   currentUser,
@@ -235,6 +238,18 @@ export const Navbar: React.FC<NavbarProps> = ({
               >
                 <Calculator className="w-4 h-4 text-amber-400" />
                 <span className="hidden sm:inline">Cierre de Caja</span>
+              </button>
+            )}
+
+            {/* Essential Action: Demostración & Tutorial en Video / PowerPoint */}
+            {onOpenVideoTutorialModal && (
+              <button
+                onClick={onOpenVideoTutorialModal}
+                title="Demostración y Tutorial en Video Animado / Presentación Interactiva"
+                className="flex items-center space-x-1.5 px-3 py-2 bg-purple-950/70 hover:bg-purple-900/80 text-purple-300 hover:text-purple-200 text-xs font-bold rounded-xl border border-purple-500/40 transition-all shadow-sm active:scale-95 shrink-0 cursor-pointer"
+              >
+                <Film className="w-4 h-4 text-purple-400" />
+                <span className="hidden sm:inline">Tutorial & Demo</span>
               </button>
             )}
 
