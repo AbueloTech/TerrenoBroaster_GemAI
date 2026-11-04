@@ -31,6 +31,7 @@ import { DEFAULT_PLATOS, generateSeedSales, generateSeedComandas } from '../data
 import { safeParsePrice } from '../utils/currency';
 import { menuSyncService } from '../services/menuSyncService';
 import { safeStorage } from '../utils/safeStorage';
+import { calculatePromoPrice } from '../utils/promo';
 
 class SQLiteService {
   private db: Database | null = null;
@@ -341,7 +342,15 @@ class SQLiteService {
         Precio REAL NOT NULL,
         Categoria TEXT NOT NULL,
         Imagen TEXT,
-        Descripcion TEXT
+        Descripcion TEXT,
+        PromoActiva INTEGER DEFAULT 0,
+        PromoTipo TEXT DEFAULT 'Porcentaje',
+        PromoValor REAL DEFAULT 0,
+        PromoVigencia TEXT DEFAULT 'Siempre',
+        PromoFechaInicio TEXT,
+        PromoFechaFin TEXT,
+        PromoDiasSemana TEXT,
+        PromoEtiqueta TEXT
       );
     `);
 
@@ -431,7 +440,15 @@ class SQLiteService {
         ProveedorId INTEGER,
         EsVentaDirecta INTEGER DEFAULT 0,
         PlatoId INTEGER,
-        UltimaActualizacion TEXT
+        UltimaActualizacion TEXT,
+        PromoActiva INTEGER DEFAULT 0,
+        PromoTipo TEXT DEFAULT 'Porcentaje',
+        PromoValor REAL DEFAULT 0,
+        PromoVigencia TEXT DEFAULT 'Siempre',
+        PromoFechaInicio TEXT,
+        PromoFechaFin TEXT,
+        PromoDiasSemana TEXT,
+        PromoEtiqueta TEXT
       );
     `);
 
@@ -564,6 +581,56 @@ class SQLiteService {
             this.db.run("ALTER TABLE Insumos ADD COLUMN PrecioVenta REAL DEFAULT 0;");
           } catch {
             // ignore
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    // Schema self-healing: Ensure Promo columns exist in Platos table
+    try {
+      const pragmaPlatos = this.db.exec("PRAGMA table_info(Platos);");
+      if (pragmaPlatos.length > 0 && pragmaPlatos[0].values) {
+        const colNames = pragmaPlatos[0].values.map((v: any) => String(v[1]).toLowerCase());
+        const promoCols = [
+          { name: 'promoactiva', sql: "ALTER TABLE Platos ADD COLUMN PromoActiva INTEGER DEFAULT 0;" },
+          { name: 'promotipo', sql: "ALTER TABLE Platos ADD COLUMN PromoTipo TEXT DEFAULT 'Porcentaje';" },
+          { name: 'promovalor', sql: "ALTER TABLE Platos ADD COLUMN PromoValor REAL DEFAULT 0;" },
+          { name: 'promovigencia', sql: "ALTER TABLE Platos ADD COLUMN PromoVigencia TEXT DEFAULT 'Siempre';" },
+          { name: 'promofechainicio', sql: "ALTER TABLE Platos ADD COLUMN PromoFechaInicio TEXT;" },
+          { name: 'promofechafin', sql: "ALTER TABLE Platos ADD COLUMN PromoFechaFin TEXT;" },
+          { name: 'promodiassemana', sql: "ALTER TABLE Platos ADD COLUMN PromoDiasSemana TEXT;" },
+          { name: 'promoetiqueta', sql: "ALTER TABLE Platos ADD COLUMN PromoEtiqueta TEXT;" },
+        ];
+        for (const col of promoCols) {
+          if (!colNames.includes(col.name)) {
+            try { this.db.run(col.sql); } catch {}
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    // Schema self-healing: Ensure Promo columns exist in Insumos table
+    try {
+      const pragmaInsumos = this.db.exec("PRAGMA table_info(Insumos);");
+      if (pragmaInsumos.length > 0 && pragmaInsumos[0].values) {
+        const colNames = pragmaInsumos[0].values.map((v: any) => String(v[1]).toLowerCase());
+        const promoCols = [
+          { name: 'promoactiva', sql: "ALTER TABLE Insumos ADD COLUMN PromoActiva INTEGER DEFAULT 0;" },
+          { name: 'promotipo', sql: "ALTER TABLE Insumos ADD COLUMN PromoTipo TEXT DEFAULT 'Porcentaje';" },
+          { name: 'promovalor', sql: "ALTER TABLE Insumos ADD COLUMN PromoValor REAL DEFAULT 0;" },
+          { name: 'promovigencia', sql: "ALTER TABLE Insumos ADD COLUMN PromoVigencia TEXT DEFAULT 'Siempre';" },
+          { name: 'promofechainicio', sql: "ALTER TABLE Insumos ADD COLUMN PromoFechaInicio TEXT;" },
+          { name: 'promofechafin', sql: "ALTER TABLE Insumos ADD COLUMN PromoFechaFin TEXT;" },
+          { name: 'promodiassemana', sql: "ALTER TABLE Insumos ADD COLUMN PromoDiasSemana TEXT;" },
+          { name: 'promoetiqueta', sql: "ALTER TABLE Insumos ADD COLUMN PromoEtiqueta TEXT;" },
+        ];
+        for (const col of promoCols) {
+          if (!colNames.includes(col.name)) {
+            try { this.db.run(col.sql); } catch {}
           }
         }
       }
@@ -733,7 +800,7 @@ class SQLiteService {
       return [...this.fallbackPlatos];
     }
     try {
-      const res = this.db.exec('SELECT ID, Plato, Precio, Categoria, Imagen, Descripcion FROM Platos ORDER BY ID ASC');
+      const res = this.db.exec('SELECT * FROM Platos ORDER BY ID ASC');
       if (res.length === 0) return [...this.fallbackPlatos];
       const columns = res[0].columns;
       return res[0].values.map((row) => {
@@ -748,6 +815,14 @@ class SQLiteService {
           Categoria: String(item.Categoria),
           Imagen: String(item.Imagen || ''),
           Descripcion: item.Descripcion ? String(item.Descripcion) : '',
+          PromoActiva: Boolean(item.PromoActiva),
+          PromoTipo: (item.PromoTipo as any) || 'Porcentaje',
+          PromoValor: item.PromoValor != null ? Number(item.PromoValor) : 0,
+          PromoVigencia: (item.PromoVigencia as any) || 'Siempre',
+          PromoFechaInicio: item.PromoFechaInicio ? String(item.PromoFechaInicio) : undefined,
+          PromoFechaFin: item.PromoFechaFin ? String(item.PromoFechaFin) : undefined,
+          PromoDiasSemana: item.PromoDiasSemana ? String(item.PromoDiasSemana) : undefined,
+          PromoEtiqueta: item.PromoEtiqueta ? String(item.PromoEtiqueta) : undefined,
         };
       });
     } catch (e) {
@@ -759,21 +834,75 @@ class SQLiteService {
   public addPlato(plato: Omit<Plato, 'ID'>): Plato {
     const cleanPrice = safeParsePrice(plato.Precio);
     const desc = plato.Descripcion || '';
+    const promoActiva = plato.PromoActiva ? 1 : 0;
+    const promoTipo = plato.PromoTipo || 'Porcentaje';
+    const promoValor = Number(plato.PromoValor) || 0;
+    const promoVigencia = plato.PromoVigencia || 'Siempre';
+    const promoInicio = plato.PromoFechaInicio || null;
+    const promoFin = plato.PromoFechaFin || null;
+    const promoDias = plato.PromoDiasSemana || null;
+    const promoEtiqueta = plato.PromoEtiqueta || null;
 
     let created: Plato;
     if (this.db) {
-      const stmt = this.db.prepare('INSERT INTO Platos (Plato, Precio, Categoria, Imagen, Descripcion) VALUES (?, ?, ?, ?, ?)');
-      stmt.run([plato.Plato, cleanPrice, plato.Categoria, plato.Imagen || '', desc]);
+      const stmt = this.db.prepare(
+        'INSERT INTO Platos (Plato, Precio, Categoria, Imagen, Descripcion, PromoActiva, PromoTipo, PromoValor, PromoVigencia, PromoFechaInicio, PromoFechaFin, PromoDiasSemana, PromoEtiqueta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      );
+      stmt.run([
+        plato.Plato,
+        cleanPrice,
+        plato.Categoria,
+        plato.Imagen || '',
+        desc,
+        promoActiva,
+        promoTipo,
+        promoValor,
+        promoVigencia,
+        promoInicio,
+        promoFin,
+        promoDias,
+        promoEtiqueta,
+      ]);
       stmt.free();
 
       const lastIdRes = this.db.exec('SELECT last_insert_rowid()');
       const newId = Number(lastIdRes[0].values[0][0]);
-      
-      created = { ID: newId, Plato: plato.Plato, Precio: cleanPrice, Categoria: plato.Categoria, Imagen: plato.Imagen, Descripcion: desc };
+
+      created = {
+        ID: newId,
+        Plato: plato.Plato,
+        Precio: cleanPrice,
+        Categoria: plato.Categoria,
+        Imagen: plato.Imagen,
+        Descripcion: desc,
+        PromoActiva: Boolean(promoActiva),
+        PromoTipo: promoTipo as any,
+        PromoValor: promoValor,
+        PromoVigencia: promoVigencia as any,
+        PromoFechaInicio: promoInicio || undefined,
+        PromoFechaFin: promoFin || undefined,
+        PromoDiasSemana: promoDias || undefined,
+        PromoEtiqueta: promoEtiqueta || undefined,
+      };
       this.fallbackPlatos.push(created);
     } else {
       const newId = this.fallbackPlatos.length > 0 ? Math.max(...this.fallbackPlatos.map((p) => p.ID)) + 1 : 1;
-      created = { ID: newId, Plato: plato.Plato, Precio: cleanPrice, Categoria: plato.Categoria, Imagen: plato.Imagen, Descripcion: desc };
+      created = {
+        ID: newId,
+        Plato: plato.Plato,
+        Precio: cleanPrice,
+        Categoria: plato.Categoria,
+        Imagen: plato.Imagen,
+        Descripcion: desc,
+        PromoActiva: Boolean(promoActiva),
+        PromoTipo: promoTipo as any,
+        PromoValor: promoValor,
+        PromoVigencia: promoVigencia as any,
+        PromoFechaInicio: promoInicio || undefined,
+        PromoFechaFin: promoFin || undefined,
+        PromoDiasSemana: promoDias || undefined,
+        PromoEtiqueta: promoEtiqueta || undefined,
+      };
       this.fallbackPlatos.push(created);
     }
     this.notify();
@@ -784,20 +913,85 @@ class SQLiteService {
   public updatePlato(plato: Plato): boolean {
     const cleanPrice = safeParsePrice(plato.Precio);
     const desc = plato.Descripcion || '';
+    const promoActiva = plato.PromoActiva ? 1 : 0;
+    const promoTipo = plato.PromoTipo || 'Porcentaje';
+    const promoValor = Number(plato.PromoValor) || 0;
+    const promoVigencia = plato.PromoVigencia || 'Siempre';
+    const promoInicio = plato.PromoFechaInicio || null;
+    const promoFin = plato.PromoFechaFin || null;
+    const promoDias = plato.PromoDiasSemana || null;
+    const promoEtiqueta = plato.PromoEtiqueta || null;
 
     if (this.db) {
-      const stmt = this.db.prepare('UPDATE Platos SET Plato = ?, Precio = ?, Categoria = ?, Imagen = ?, Descripcion = ? WHERE ID = ?');
-      stmt.run([plato.Plato, cleanPrice, plato.Categoria, plato.Imagen || '', desc, plato.ID]);
+      const stmt = this.db.prepare(
+        'UPDATE Platos SET Plato = ?, Precio = ?, Categoria = ?, Imagen = ?, Descripcion = ?, PromoActiva = ?, PromoTipo = ?, PromoValor = ?, PromoVigencia = ?, PromoFechaInicio = ?, PromoFechaFin = ?, PromoDiasSemana = ?, PromoEtiqueta = ? WHERE ID = ?'
+      );
+      stmt.run([
+        plato.Plato,
+        cleanPrice,
+        plato.Categoria,
+        plato.Imagen || '',
+        desc,
+        promoActiva,
+        promoTipo,
+        promoValor,
+        promoVigencia,
+        promoInicio,
+        promoFin,
+        promoDias,
+        promoEtiqueta,
+        plato.ID,
+      ]);
       stmt.free();
     }
-    
+
     const idx = this.fallbackPlatos.findIndex((p) => p.ID === plato.ID);
     if (idx !== -1) {
-      this.fallbackPlatos[idx] = { ...plato, Precio: cleanPrice, Descripcion: desc };
+      this.fallbackPlatos[idx] = {
+        ...plato,
+        Precio: cleanPrice,
+        Descripcion: desc,
+        PromoActiva: Boolean(promoActiva),
+        PromoTipo: promoTipo as any,
+        PromoValor: promoValor,
+        PromoVigencia: promoVigencia as any,
+        PromoFechaInicio: promoInicio || undefined,
+        PromoFechaFin: promoFin || undefined,
+        PromoDiasSemana: promoDias || undefined,
+        PromoEtiqueta: promoEtiqueta || undefined,
+      };
     }
     this.notify();
     this.uploadDatabaseToServer();
     return true;
+  }
+
+  public updatePlatoPromo(
+    platoId: number,
+    promoData: {
+      PromoActiva: boolean;
+      PromoTipo?: 'Porcentaje' | 'PrecioFijo';
+      PromoValor?: number;
+      PromoVigencia?: 'Siempre' | 'Intervalo' | 'DiasSemana';
+      PromoFechaInicio?: string;
+      PromoFechaFin?: string;
+      PromoDiasSemana?: string;
+      PromoEtiqueta?: string;
+    }
+  ): boolean {
+    const plato = this.getPlatos().find((p) => p.ID === platoId);
+    if (!plato) return false;
+    return this.updatePlato({
+      ...plato,
+      PromoActiva: promoData.PromoActiva,
+      PromoTipo: promoData.PromoTipo || 'Porcentaje',
+      PromoValor: promoData.PromoValor || 0,
+      PromoVigencia: promoData.PromoVigencia || 'Siempre',
+      PromoFechaInicio: promoData.PromoFechaInicio,
+      PromoFechaFin: promoData.PromoFechaFin,
+      PromoDiasSemana: promoData.PromoDiasSemana,
+      PromoEtiqueta: promoData.PromoEtiqueta,
+    });
   }
 
   public deletePlato(id: number): boolean {
@@ -2678,7 +2872,9 @@ class SQLiteService {
     }
     try {
       const res = this.db.exec(`
-        SELECT i.InsumoId, i.Nombre, i.Categoria, i.UnidadMedida, i.StockActual, i.StockMinimo, i.CostoUnitario, i.PrecioVenta, i.ProveedorId, i.EsVentaDirecta, i.PlatoId, i.UltimaActualizacion, p.Nombre as ProveedorNombre
+        SELECT i.InsumoId, i.Nombre, i.Categoria, i.UnidadMedida, i.StockActual, i.StockMinimo, i.CostoUnitario, i.PrecioVenta, i.ProveedorId, i.EsVentaDirecta, i.PlatoId, i.UltimaActualizacion,
+               i.PromoActiva, i.PromoTipo, i.PromoValor, i.PromoVigencia, i.PromoFechaInicio, i.PromoFechaFin, i.PromoDiasSemana, i.PromoEtiqueta,
+               p.Nombre as ProveedorNombre
         FROM Insumos i
         LEFT JOIN Proveedores p ON i.ProveedorId = p.ProveedorId
         ORDER BY i.Categoria ASC, i.Nombre ASC
@@ -2702,6 +2898,14 @@ class SQLiteService {
           EsVentaDirecta: Boolean(item.EsVentaDirecta),
           PlatoId: item.PlatoId ? Number(item.PlatoId) : undefined,
           UltimaActualizacion: item.UltimaActualizacion ? String(item.UltimaActualizacion) : undefined,
+          PromoActiva: Boolean(item.PromoActiva),
+          PromoTipo: (item.PromoTipo as any) || 'Porcentaje',
+          PromoValor: item.PromoValor != null ? Number(item.PromoValor) : 0,
+          PromoVigencia: (item.PromoVigencia as any) || 'Siempre',
+          PromoFechaInicio: item.PromoFechaInicio ? String(item.PromoFechaInicio) : undefined,
+          PromoFechaFin: item.PromoFechaFin ? String(item.PromoFechaFin) : undefined,
+          PromoDiasSemana: item.PromoDiasSemana ? String(item.PromoDiasSemana) : undefined,
+          PromoEtiqueta: item.PromoEtiqueta ? String(item.PromoEtiqueta) : undefined,
         };
       });
     } catch (e) {
@@ -2716,10 +2920,18 @@ class SQLiteService {
     const cleanMin = Number(data.StockMinimo) || 0;
     const cleanCost = safeParsePrice(data.CostoUnitario);
     const cleanPrice = data.PrecioVenta ? safeParsePrice(data.PrecioVenta) : 0;
+    const promoActiva = data.PromoActiva ? 1 : 0;
+    const promoTipo = data.PromoTipo || 'Porcentaje';
+    const promoValor = Number(data.PromoValor) || 0;
+    const promoVigencia = data.PromoVigencia || 'Siempre';
+    const promoInicio = data.PromoFechaInicio || null;
+    const promoFin = data.PromoFechaFin || null;
+    const promoDias = data.PromoDiasSemana || null;
+    const promoEtiqueta = data.PromoEtiqueta || null;
 
     if (this.db) {
       const stmt = this.db.prepare(
-        'INSERT INTO Insumos (Nombre, Categoria, UnidadMedida, StockActual, StockMinimo, CostoUnitario, PrecioVenta, ProveedorId, EsVentaDirecta, PlatoId, UltimaActualizacion) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO Insumos (Nombre, Categoria, UnidadMedida, StockActual, StockMinimo, CostoUnitario, PrecioVenta, ProveedorId, EsVentaDirecta, PlatoId, UltimaActualizacion, PromoActiva, PromoTipo, PromoValor, PromoVigencia, PromoFechaInicio, PromoFechaFin, PromoDiasSemana, PromoEtiqueta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
       );
       stmt.run([
         data.Nombre.trim(),
@@ -2733,6 +2945,14 @@ class SQLiteService {
         data.EsVentaDirecta ? 1 : 0,
         data.PlatoId || null,
         now,
+        promoActiva,
+        promoTipo,
+        promoValor,
+        promoVigencia,
+        promoInicio,
+        promoFin,
+        promoDias,
+        promoEtiqueta,
       ]);
       stmt.free();
 
@@ -2767,6 +2987,14 @@ class SQLiteService {
         EsVentaDirecta: data.EsVentaDirecta,
         PlatoId: data.PlatoId,
         UltimaActualizacion: now,
+        PromoActiva: Boolean(promoActiva),
+        PromoTipo: promoTipo as any,
+        PromoValor: promoValor,
+        PromoVigencia: promoVigencia as any,
+        PromoFechaInicio: promoInicio || undefined,
+        PromoFechaFin: promoFin || undefined,
+        PromoDiasSemana: promoDias || undefined,
+        PromoEtiqueta: promoEtiqueta || undefined,
       };
 
       this.fallbackInsumos.push(created);
@@ -2788,6 +3016,14 @@ class SQLiteService {
         EsVentaDirecta: data.EsVentaDirecta,
         PlatoId: data.PlatoId,
         UltimaActualizacion: now,
+        PromoActiva: Boolean(promoActiva),
+        PromoTipo: promoTipo as any,
+        PromoValor: promoValor,
+        PromoVigencia: promoVigencia as any,
+        PromoFechaInicio: promoInicio || undefined,
+        PromoFechaFin: promoFin || undefined,
+        PromoDiasSemana: promoDias || undefined,
+        PromoEtiqueta: promoEtiqueta || undefined,
       };
       this.fallbackInsumos.push(created);
       this.notify();
@@ -2802,10 +3038,18 @@ class SQLiteService {
     const cleanStock = Number(insumo.StockActual) || 0;
     const cleanMin = Number(insumo.StockMinimo) || 0;
     const cleanPrice = insumo.PrecioVenta ? safeParsePrice(insumo.PrecioVenta) : 0;
+    const promoActiva = insumo.PromoActiva ? 1 : 0;
+    const promoTipo = insumo.PromoTipo || 'Porcentaje';
+    const promoValor = Number(insumo.PromoValor) || 0;
+    const promoVigencia = insumo.PromoVigencia || 'Siempre';
+    const promoInicio = insumo.PromoFechaInicio || null;
+    const promoFin = insumo.PromoFechaFin || null;
+    const promoDias = insumo.PromoDiasSemana || null;
+    const promoEtiqueta = insumo.PromoEtiqueta || null;
 
     if (this.db) {
       const stmt = this.db.prepare(
-        'UPDATE Insumos SET Nombre = ?, Categoria = ?, UnidadMedida = ?, StockActual = ?, StockMinimo = ?, CostoUnitario = ?, PrecioVenta = ?, ProveedorId = ?, EsVentaDirecta = ?, PlatoId = ?, UltimaActualizacion = ? WHERE InsumoId = ?'
+        'UPDATE Insumos SET Nombre = ?, Categoria = ?, UnidadMedida = ?, StockActual = ?, StockMinimo = ?, CostoUnitario = ?, PrecioVenta = ?, ProveedorId = ?, EsVentaDirecta = ?, PlatoId = ?, UltimaActualizacion = ?, PromoActiva = ?, PromoTipo = ?, PromoValor = ?, PromoVigencia = ?, PromoFechaInicio = ?, PromoFechaFin = ?, PromoDiasSemana = ?, PromoEtiqueta = ? WHERE InsumoId = ?'
       );
       stmt.run([
         insumo.Nombre.trim(),
@@ -2819,6 +3063,14 @@ class SQLiteService {
         insumo.EsVentaDirecta ? 1 : 0,
         insumo.PlatoId || null,
         now,
+        promoActiva,
+        promoTipo,
+        promoValor,
+        promoVigencia,
+        promoInicio,
+        promoFin,
+        promoDias,
+        promoEtiqueta,
         insumo.InsumoId,
       ]);
       stmt.free();
@@ -2833,6 +3085,14 @@ class SQLiteService {
         StockMinimo: cleanMin,
         PrecioVenta: cleanPrice > 0 ? cleanPrice : undefined,
         UltimaActualizacion: now,
+        PromoActiva: Boolean(promoActiva),
+        PromoTipo: promoTipo as any,
+        PromoValor: promoValor,
+        PromoVigencia: promoVigencia as any,
+        PromoFechaInicio: promoInicio || undefined,
+        PromoFechaFin: promoFin || undefined,
+        PromoDiasSemana: promoDias || undefined,
+        PromoEtiqueta: promoEtiqueta || undefined,
       };
     }
 
@@ -3176,6 +3436,16 @@ class SQLiteService {
       const precioSugeridoMargen50 = costoTotalInsumos > 0 ? Math.round(costoTotalInsumos / 0.50) : precioVenta;
       const precioSugeridoMargen70 = costoTotalInsumos > 0 ? Math.round(costoTotalInsumos / 0.30) : precioVenta;
 
+      // Promo calculation
+      const promoSource = plato.PromoActiva ? plato : (matchedInsumo?.PromoActiva ? matchedInsumo : plato);
+      const promoCalc = calculatePromoPrice(precioVenta, promoSource);
+
+      const precioPromoActual = promoCalc.isPromoActive ? promoCalc.finalPrice : undefined;
+      const margenPromoBruto = promoCalc.isPromoActive ? Number((promoCalc.finalPrice - costoTotalInsumos).toFixed(2)) : undefined;
+      const margenPromoPorcentaje = promoCalc.isPromoActive && promoCalc.finalPrice > 0
+        ? Number((((promoCalc.finalPrice - costoTotalInsumos) / promoCalc.finalPrice) * 100).toFixed(1))
+        : undefined;
+
       return {
         PlatoId: plato.ID,
         PlatoNombre: plato.Plato,
@@ -3192,6 +3462,18 @@ class SQLiteService {
         TieneReceta: ingredientes.length > 0,
         EsVentaDirecta: isDirectSale,
         InsumoId: matchedInsumo?.InsumoId,
+        // Promoción
+        PromoActiva: promoSource.PromoActiva,
+        PromoTipo: promoSource.PromoTipo,
+        PromoValor: promoSource.PromoValor,
+        PromoVigencia: promoSource.PromoVigencia,
+        PromoFechaInicio: promoSource.PromoFechaInicio,
+        PromoFechaFin: promoSource.PromoFechaFin,
+        PromoDiasSemana: promoSource.PromoDiasSemana,
+        PromoEtiqueta: promoSource.PromoEtiqueta,
+        PrecioPromoActual: precioPromoActual,
+        MargenPromoBruto: margenPromoBruto,
+        MargenPromoPorcentaje: margenPromoPorcentaje,
       };
     });
   }
@@ -3242,6 +3524,14 @@ class SQLiteService {
         ...targetPlato,
         Plato: nombre.trim(),
         Precio: cleanPrice,
+        PromoActiva: insumo?.PromoActiva,
+        PromoTipo: insumo?.PromoTipo,
+        PromoValor: insumo?.PromoValor,
+        PromoVigencia: insumo?.PromoVigencia,
+        PromoFechaInicio: insumo?.PromoFechaInicio,
+        PromoFechaFin: insumo?.PromoFechaFin,
+        PromoDiasSemana: insumo?.PromoDiasSemana,
+        PromoEtiqueta: insumo?.PromoEtiqueta,
       });
 
       if (insumo && (insumo.PlatoId !== targetPlato.ID || insumo.PrecioVenta !== cleanPrice)) {
@@ -3260,6 +3550,14 @@ class SQLiteService {
         Categoria: posCategoria,
         Imagen: defaultImg,
         Descripcion: `Producto de venta directa listo para consumo inmediato (${nombre.trim()}).`,
+        PromoActiva: insumo?.PromoActiva,
+        PromoTipo: insumo?.PromoTipo,
+        PromoValor: insumo?.PromoValor,
+        PromoVigencia: insumo?.PromoVigencia,
+        PromoFechaInicio: insumo?.PromoFechaInicio,
+        PromoFechaFin: insumo?.PromoFechaFin,
+        PromoDiasSemana: insumo?.PromoDiasSemana,
+        PromoEtiqueta: insumo?.PromoEtiqueta,
       });
 
       if (insumo) {

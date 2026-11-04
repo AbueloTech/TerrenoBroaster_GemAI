@@ -4,6 +4,7 @@ import { imageService } from '../services/imageService';
 import { sqliteService } from '../db/sqliteService';
 import { formatPrice, safeParsePrice } from '../utils/currency';
 import { kitchenPrinterService } from '../services/kitchenPrinterService';
+import { calculatePromoPrice } from '../utils/promo';
 import confetti from 'canvas-confetti';
 import {
   Search,
@@ -162,14 +163,23 @@ export const POSView: React.FC<POSViewProps> = ({
   // Cart operations
   const addToCart = (plato: Plato) => {
     playBeep(700, 0.06);
+    const promo = calculatePromoPrice(plato.Precio, plato);
+    const effectivePlato: Plato = promo.isPromoActive
+      ? {
+          ...plato,
+          Precio: promo.finalPrice,
+          PrecioOriginal: promo.basePrice,
+        }
+      : plato;
+
     setCart((prev) => {
       const existing = prev.find((item) => item.plato.ID === plato.ID);
       if (existing) {
         return prev.map((item) =>
-          item.plato.ID === plato.ID ? { ...item, cantidad: item.cantidad + 1 } : item
+          item.plato.ID === plato.ID ? { ...item, plato: effectivePlato, cantidad: item.cantidad + 1 } : item
         );
       }
-      return [...prev, { plato, cantidad: 1 }];
+      return [...prev, { plato: effectivePlato, cantidad: 1 }];
     });
   };
 
@@ -538,11 +548,13 @@ export const POSView: React.FC<POSViewProps> = ({
             <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3.5">
               {filteredPlatos.map((plato) => {
                 const inCart = cart.find((i) => i.plato.ID === plato.ID);
+                const promo = calculatePromoPrice(plato.Precio, plato);
+
                 return (
                   <div
                     key={plato.ID}
                     onClick={() => addToCart(plato)}
-                    className={`group bg-stone-900 border rounded-2xl overflow-hidden cursor-pointer transition-all flex flex-col hover:border-amber-500/60 hover:shadow-lg hover:shadow-amber-500/5 select-none ${
+                    className={`group bg-stone-900 border rounded-2xl overflow-hidden cursor-pointer transition-all flex flex-col hover:border-amber-500/60 hover:shadow-lg hover:shadow-amber-500/5 select-none relative ${
                       inCart ? 'border-amber-500/70 ring-1 ring-amber-500/30' : 'border-stone-800'
                     }`}
                   >
@@ -558,13 +570,26 @@ export const POSView: React.FC<POSViewProps> = ({
                           target.src = imageService.getSmartFoodImage(plato.Plato, plato.Categoria);
                         }}
                       />
-                      <span className="absolute top-2 left-2 bg-stone-950/80 backdrop-blur-xs text-[10px] font-semibold text-stone-300 px-2 py-0.5 rounded-md border border-stone-700">
+                      <span className="absolute top-2 left-2 bg-stone-950/80 backdrop-blur-xs text-[10px] font-semibold text-stone-300 px-2 py-0.5 rounded-md border border-stone-700 z-10">
                         {plato.Categoria}
                       </span>
 
+                      {/* Diagonal Promotional Ribbon across top-right corner of image */}
+                      {promo.isPromoActive && (
+                        <div className="absolute -top-1 -right-1 w-24 h-24 overflow-hidden pointer-events-none z-20">
+                          <div className="absolute top-4 -right-7 w-28 transform rotate-45 bg-gradient-to-r from-red-600 via-rose-600 to-amber-500 text-white font-black text-[9px] tracking-wider py-0.5 text-center shadow-lg uppercase border-y border-yellow-300/40">
+                            🔥 {promo.badgeLabel}
+                          </div>
+                        </div>
+                      )}
+
                       {/* Badge if item is in cart */}
                       {inCart && (
-                        <span className="absolute top-2 right-2 bg-amber-500 text-stone-950 text-xs font-black px-2 py-0.5 rounded-full shadow-lg">
+                        <span
+                          className={`absolute ${
+                            promo.isPromoActive ? 'bottom-2 right-2' : 'top-2 right-2'
+                          } bg-amber-500 text-stone-950 text-xs font-black px-2 py-0.5 rounded-full shadow-lg z-10`}
+                        >
                           {inCart.cantidad} en orden
                         </span>
                       )}
@@ -584,12 +609,28 @@ export const POSView: React.FC<POSViewProps> = ({
                       </div>
 
                       <div className="mt-3 flex items-center justify-between pt-2 border-t border-stone-800/80">
-                        <span className="text-amber-400 font-black text-sm sm:text-base font-mono">
-                          {formatPrice(plato.Precio)}
-                        </span>
+                        {promo.isPromoActive ? (
+                          <div className="flex flex-col min-w-0 pr-1">
+                            <div className="flex items-baseline space-x-1.5 flex-wrap">
+                              <span className="text-emerald-400 font-black text-sm sm:text-base font-mono">
+                                {formatPrice(promo.finalPrice)}
+                              </span>
+                              <span className="text-[10px] text-stone-500 line-through font-mono">
+                                {formatPrice(promo.basePrice)}
+                              </span>
+                            </div>
+                            <span className="text-[9px] text-amber-400 font-semibold truncate">
+                              🏷️ {promo.scheduleDescription || 'En promoción'}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-amber-400 font-black text-sm sm:text-base font-mono">
+                            {formatPrice(plato.Precio)}
+                          </span>
+                        )}
                         <button
                           type="button"
-                          className="w-7 h-7 rounded-lg bg-stone-800 group-hover:bg-amber-500 text-stone-300 group-hover:text-stone-950 flex items-center justify-center transition-colors"
+                          className="w-7 h-7 rounded-lg bg-stone-800 group-hover:bg-amber-500 text-stone-300 group-hover:text-stone-950 flex items-center justify-center transition-colors shrink-0"
                         >
                           <Plus className="w-4 h-4" />
                         </button>
@@ -858,8 +899,24 @@ export const POSView: React.FC<POSViewProps> = ({
                   />
                   
                   <div className="flex-1 min-w-0">
-                    <h5 className="text-xs font-semibold text-stone-200 truncate">{item.plato.Plato}</h5>
-                    <p className="text-[11px] text-stone-400 font-mono">{formatPrice(itemPrice)} c/u</p>
+                    <div className="flex items-center space-x-1.5 truncate">
+                      <h5 className="text-xs font-semibold text-stone-200 truncate">{item.plato.Plato}</h5>
+                      {item.plato.PrecioOriginal && item.plato.PrecioOriginal > itemPrice && (
+                        <span className="shrink-0 text-[9px] font-black px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                          🔥 PROMO
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center space-x-1.5 text-[11px] font-mono">
+                      <span className={item.plato.PrecioOriginal && item.plato.PrecioOriginal > itemPrice ? 'text-emerald-400 font-bold' : 'text-stone-400'}>
+                        {formatPrice(itemPrice)} c/u
+                      </span>
+                      {item.plato.PrecioOriginal && item.plato.PrecioOriginal > itemPrice && (
+                        <span className="text-stone-500 line-through text-[10px]">
+                          {formatPrice(item.plato.PrecioOriginal)}
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   <div className="flex items-center space-x-1.5 shrink-0">

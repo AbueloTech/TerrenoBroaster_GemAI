@@ -27,6 +27,7 @@ import { DEFAULT_PLATOS } from '../data/defaultData';
 import { imageService } from '../services/imageService';
 import { menuSyncService } from '../services/menuSyncService';
 import { formatCurrency } from '../utils/currency';
+import { calculatePromoPrice } from '../utils/promo';
 import { buildDigitalMenuWhatsAppUrl } from '../utils/whatsappParser';
 import { BrandLogo } from './BrandLogo';
 
@@ -145,14 +146,23 @@ export const CustomerMenuView: React.FC<CustomerMenuViewProps> = ({
   }, [cart]);
 
   const handleAddToCart = (plato: Plato) => {
+    const promo = calculatePromoPrice(plato.Precio, plato);
+    const effectivePlato: Plato = promo.isPromoActive
+      ? {
+          ...plato,
+          Precio: promo.finalPrice,
+          PrecioOriginal: promo.basePrice,
+        }
+      : plato;
+
     setCart((prev) => {
       const existing = prev.find((item) => item.plato.ID === plato.ID);
       if (existing) {
         return prev.map((item) =>
-          item.plato.ID === plato.ID ? { ...item, cantidad: item.cantidad + 1 } : item
+          item.plato.ID === plato.ID ? { ...item, plato: effectivePlato, cantidad: item.cantidad + 1 } : item
         );
       }
-      return [...prev, { plato, cantidad: 1 }];
+      return [...prev, { plato: effectivePlato, cantidad: 1 }];
     });
   };
 
@@ -361,11 +371,12 @@ export const CustomerMenuView: React.FC<CustomerMenuViewProps> = ({
             {filteredPlatos.map((plato) => {
               const qtyInCart = getItemQtyInCart(plato.ID);
               const imageUrl = plato.Imagen ? imageService.getImageUrl(plato.Imagen) : '';
+              const promo = calculatePromoPrice(plato.Precio, plato);
 
               return (
                 <div
                   key={plato.ID}
-                  className="bg-stone-900 border border-stone-800 rounded-2xl overflow-hidden shadow-lg flex flex-col justify-between hover:border-stone-700 transition-all group"
+                  className="bg-stone-900 border border-stone-800 rounded-2xl overflow-hidden shadow-lg flex flex-col justify-between hover:border-stone-700 transition-all group relative"
                 >
                   {/* Dish Visual Header */}
                   <div className="relative h-36 bg-gradient-to-t from-stone-900 to-stone-800 flex items-center justify-center overflow-hidden">
@@ -386,9 +397,18 @@ export const CustomerMenuView: React.FC<CustomerMenuViewProps> = ({
                         </span>
                       </div>
                     )}
-                    <span className="absolute top-2 left-2 px-2 py-0.5 rounded-full text-[10px] font-bold bg-stone-950/80 backdrop-blur-sm text-amber-300 border border-stone-700">
+                    <span className="absolute top-2 left-2 px-2 py-0.5 rounded-full text-[10px] font-bold bg-stone-950/80 backdrop-blur-sm text-amber-300 border border-stone-700 z-10">
                       {plato.Categoria}
                     </span>
+
+                    {/* Diagonal Promo Ribbon */}
+                    {promo.isPromoActive && (
+                      <div className="absolute -top-1 -right-1 w-24 h-24 overflow-hidden pointer-events-none z-20">
+                        <div className="absolute top-4 -right-7 w-28 transform rotate-45 bg-gradient-to-r from-red-600 via-rose-600 to-amber-500 text-white font-black text-[9px] tracking-wider py-0.5 text-center shadow-lg uppercase border-y border-yellow-300/40">
+                          🔥 {promo.badgeLabel}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Body Content */}
@@ -409,9 +429,25 @@ export const CustomerMenuView: React.FC<CustomerMenuViewProps> = ({
                         <span className="text-[10px] text-stone-500 font-semibold uppercase">
                           Precio
                         </span>
-                        <span className="text-base font-black text-amber-400 font-mono">
-                          {formatCurrency(plato.Precio)}
-                        </span>
+                        {promo.isPromoActive ? (
+                          <div className="flex items-baseline space-x-1.5 flex-wrap">
+                            <span className="text-base font-black text-emerald-400 font-mono">
+                              {formatCurrency(promo.finalPrice)}
+                            </span>
+                            <span className="text-xs text-stone-500 line-through font-mono">
+                              {formatCurrency(promo.basePrice)}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-base font-black text-amber-400 font-mono">
+                            {formatCurrency(plato.Precio)}
+                          </span>
+                        )}
+                        {promo.isPromoActive && (
+                          <span className="text-[9px] text-amber-400 font-medium">
+                            🏷️ {promo.scheduleDescription || 'En oferta especial'}
+                          </span>
+                        )}
                       </div>
 
                       {/* Interactive Add or Qty Counter */}
@@ -537,10 +573,24 @@ export const CustomerMenuView: React.FC<CustomerMenuViewProps> = ({
                         className="bg-stone-950/80 border border-stone-800 p-3 rounded-xl flex items-center justify-between gap-3 text-xs"
                       >
                         <div className="flex-1 min-w-0">
-                          <h5 className="font-bold text-white truncate">{item.plato.Plato}</h5>
-                          <span className="text-stone-400 text-[11px] font-mono">
-                            {formatCurrency(item.plato.Precio)} c/u
-                          </span>
+                          <div className="flex items-center space-x-1.5 truncate">
+                            <h5 className="font-bold text-white truncate">{item.plato.Plato}</h5>
+                            {item.plato.PrecioOriginal && item.plato.PrecioOriginal > item.plato.Precio && (
+                              <span className="shrink-0 text-[9px] font-black px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                                🔥 PROMO
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center space-x-1.5 font-mono text-[11px]">
+                            <span className={item.plato.PrecioOriginal && item.plato.PrecioOriginal > item.plato.Precio ? 'text-emerald-400 font-bold' : 'text-stone-400'}>
+                              {formatCurrency(item.plato.Precio)} c/u
+                            </span>
+                            {item.plato.PrecioOriginal && item.plato.PrecioOriginal > item.plato.Precio && (
+                              <span className="text-stone-500 line-through text-[10px]">
+                                {formatCurrency(item.plato.PrecioOriginal)}
+                              </span>
+                            )}
+                          </div>
                         </div>
 
                         {/* Quantity Counter */}

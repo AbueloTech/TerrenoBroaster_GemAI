@@ -46,6 +46,7 @@ import {
 } from '../types';
 import { sqliteService } from '../db/sqliteService';
 import { formatCurrency, safeParsePrice } from '../utils/currency';
+import { calculatePromoPrice, parseDiasSemana, DIAS_SEMANA_MAP } from '../utils/promo';
 import { PrintReportModal, PrintReportModalProps } from './PrintReportModal';
 
 interface InventarioViewProps {
@@ -101,6 +102,16 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
   const [modalPrecioVenta, setModalPrecioVenta] = useState<number>(2.0);
   const [modalSyncPlato, setModalSyncPlato] = useState(true);
 
+  // Controlled states for Insumo Promotion in modal
+  const [modalPromoActiva, setModalPromoActiva] = useState(false);
+  const [modalPromoTipo, setModalPromoTipo] = useState<'Porcentaje' | 'PrecioFijo'>('Porcentaje');
+  const [modalPromoValor, setModalPromoValor] = useState<number>(15);
+  const [modalPromoVigencia, setModalPromoVigencia] = useState<'Siempre' | 'Intervalo' | 'DiasSemana'>('Siempre');
+  const [modalPromoFechaInicio, setModalPromoFechaInicio] = useState<string>('');
+  const [modalPromoFechaFin, setModalPromoFechaFin] = useState<string>('');
+  const [modalPromoDiasSemana, setModalPromoDiasSemana] = useState<number[]>([1, 2, 3, 4, 5]);
+  const [modalPromoEtiqueta, setModalPromoEtiqueta] = useState<string>('');
+
   const [isEntradaModalOpen, setIsEntradaModalOpen] = useState(false);
   const [selectedInsumoForEntrada, setSelectedInsumoForEntrada] = useState<Insumo | null>(null);
   const [entradaCantidad, setEntradaCantidad] = useState<number>(1);
@@ -122,6 +133,16 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
   const [newIngredienteCantidad, setNewIngredienteCantidad] = useState<number>(1);
   const [newIngredienteNotas, setNewIngredienteNotas] = useState<string>('');
 
+  // Controlled states for Selected Dish Promotion in Escandallos tab
+  const [dishPromoActiva, setDishPromoActiva] = useState(false);
+  const [dishPromoTipo, setDishPromoTipo] = useState<'Porcentaje' | 'PrecioFijo'>('Porcentaje');
+  const [dishPromoValor, setDishPromoValor] = useState<number>(15);
+  const [dishPromoVigencia, setDishPromoVigencia] = useState<'Siempre' | 'Intervalo' | 'DiasSemana'>('Siempre');
+  const [dishPromoFechaInicio, setDishPromoFechaInicio] = useState<string>('');
+  const [dishPromoFechaFin, setDishPromoFechaFin] = useState<string>('');
+  const [dishPromoDiasSemana, setDishPromoDiasSemana] = useState<number[]>([1, 2, 3, 4, 5]);
+  const [dishPromoEtiqueta, setDishPromoEtiqueta] = useState<string>('');
+
   // UI Feedback
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isLocalLinked, setIsLocalLinked] = useState<boolean>(() => sqliteService.isLocalFileLinked());
@@ -139,6 +160,14 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
     setModalCostoUnitario(1.0);
     setModalPrecioVenta(forceVentaDirecta ? 2.5 : 2.0);
     setModalSyncPlato(true);
+    setModalPromoActiva(false);
+    setModalPromoTipo('Porcentaje');
+    setModalPromoValor(15);
+    setModalPromoVigencia('Siempre');
+    setModalPromoFechaInicio('');
+    setModalPromoFechaFin('');
+    setModalPromoDiasSemana([1, 2, 3, 4, 5]);
+    setModalPromoEtiqueta('');
     setIsInsumoModalOpen(true);
   };
 
@@ -156,6 +185,14 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
         : linkedPlato?.Precio || (ins.CostoUnitario > 0 ? Math.round(ins.CostoUnitario / 0.5) : 2.0);
     setModalPrecioVenta(initialPrice);
     setModalSyncPlato(true);
+    setModalPromoActiva(Boolean(ins.PromoActiva));
+    setModalPromoTipo(ins.PromoTipo || 'Porcentaje');
+    setModalPromoValor(ins.PromoValor != null ? ins.PromoValor : 15);
+    setModalPromoVigencia(ins.PromoVigencia || 'Siempre');
+    setModalPromoFechaInicio(ins.PromoFechaInicio || '');
+    setModalPromoFechaFin(ins.PromoFechaFin || '');
+    setModalPromoDiasSemana(parseDiasSemana(ins.PromoDiasSemana).length > 0 ? parseDiasSemana(ins.PromoDiasSemana) : [1, 2, 3, 4, 5]);
+    setModalPromoEtiqueta(ins.PromoEtiqueta || '');
     setIsInsumoModalOpen(true);
   };
 
@@ -295,6 +332,46 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
     };
   }, [selectedPlato, currentCalculatedFoodCost]);
 
+  // Sync selected dish promo configuration whenever dish changes
+  useEffect(() => {
+    if (selectedPlato) {
+      setDishPromoActiva(Boolean(selectedPlato.PromoActiva));
+      setDishPromoTipo(selectedPlato.PromoTipo || 'Porcentaje');
+      setDishPromoValor(selectedPlato.PromoValor != null && selectedPlato.PromoValor > 0 ? selectedPlato.PromoValor : 15);
+      setDishPromoVigencia(selectedPlato.PromoVigencia || 'Siempre');
+      setDishPromoFechaInicio(selectedPlato.PromoFechaInicio || '');
+      setDishPromoFechaFin(selectedPlato.PromoFechaFin || '');
+      const parsedDays = parseDiasSemana(selectedPlato.PromoDiasSemana);
+      setDishPromoDiasSemana(parsedDays.length > 0 ? parsedDays : [1, 2, 3, 4, 5]);
+      setDishPromoEtiqueta(selectedPlato.PromoEtiqueta || '');
+    }
+  }, [selectedPlatoId, selectedPlato]);
+
+  // Save Dish Promotion directly from Escandallos tab
+  const handleSaveDishPromo = () => {
+    if (!selectedPlatoId || !selectedPlato) return;
+    const ok = sqliteService.updatePlatoPromo(selectedPlatoId, {
+      PromoActiva: dishPromoActiva,
+      PromoTipo: dishPromoTipo,
+      PromoValor: safeParsePrice(dishPromoValor),
+      PromoVigencia: dishPromoVigencia,
+      PromoFechaInicio: dishPromoFechaInicio || undefined,
+      PromoFechaFin: dishPromoFechaFin || undefined,
+      PromoDiasSemana: JSON.stringify(dishPromoDiasSemana),
+      PromoEtiqueta: dishPromoEtiqueta.trim() || undefined,
+    });
+
+    if (ok) {
+      showToast(
+        dishPromoActiva
+          ? `¡Promoción para "${selectedPlato.Plato}" activada y publicada en POS!`
+          : `Promoción de "${selectedPlato.Plato}" desactivada.`
+      );
+      loadData();
+      if (onRefreshPlatos) onRefreshPlatos();
+    }
+  };
+
   // Save Insumo Form
   const handleSaveInsumo = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -315,6 +392,17 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
       return;
     }
 
+    const promoData = {
+      PromoActiva: modalPromoActiva,
+      PromoTipo: modalPromoTipo,
+      PromoValor: safeParsePrice(modalPromoValor),
+      PromoVigencia: modalPromoVigencia,
+      PromoFechaInicio: modalPromoFechaInicio || undefined,
+      PromoFechaFin: modalPromoFechaFin || undefined,
+      PromoDiasSemana: JSON.stringify(modalPromoDiasSemana),
+      PromoEtiqueta: modalPromoEtiqueta.trim() || undefined,
+    };
+
     let savedInsumo: Insumo;
     if (editingInsumo) {
       savedInsumo = {
@@ -328,6 +416,7 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
         PrecioVenta: precioVenta,
         ProveedorId: proveedorId,
         EsVentaDirecta: esVentaDirecta,
+        ...promoData,
       };
       sqliteService.updateInsumo(savedInsumo);
       showToast(`Insumo "${nombre}" actualizado correctamente.`);
@@ -342,6 +431,7 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
         PrecioVenta: precioVenta,
         ProveedorId: proveedorId,
         EsVentaDirecta: esVentaDirecta,
+        ...promoData,
       });
       showToast(`Insumo "${nombre}" creado correctamente.`);
     }
@@ -1225,9 +1315,16 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
                             <td className="py-3.5 px-4">
                               {item.EsVentaDirecta ? (
                                 <div className="space-y-1">
-                                  <span className="px-2 py-0.5 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-300 text-[10px] font-bold inline-block">
-                                    🏷️ Venta Directa
-                                  </span>
+                                  <div className="flex items-center gap-1 flex-wrap">
+                                    <span className="px-2 py-0.5 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-300 text-[10px] font-bold inline-block">
+                                      🏷️ Venta Directa
+                                    </span>
+                                    {item.PromoActiva && (
+                                      <span className="px-1.5 py-0.5 rounded-md bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[9px] font-black uppercase inline-block">
+                                        🔥 {item.PromoEtiqueta || (item.PromoTipo === 'Porcentaje' ? `-${item.PromoValor}%` : 'OFERTA')}
+                                      </span>
+                                    )}
+                                  </div>
                                   {hasVenta ? (
                                     <div className="text-[11px] leading-tight font-mono">
                                       <span className="text-emerald-400 font-bold">${item.PrecioVenta!.toFixed(2)}</span>
@@ -1429,6 +1526,11 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
                           <span>{plato.Categoria}</span>
                           <span>•</span>
                           <span className="text-amber-400 font-mono font-bold">${plato.Precio.toFixed(2)}</span>
+                          {esc?.PromoActiva && (
+                            <span className="px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300 font-bold text-[9px] border border-rose-500/30">
+                              🔥 Promo
+                            </span>
+                          )}
                         </div>
                       </div>
 
@@ -1631,6 +1733,308 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
                         </div>
                       </div>
                     </div>
+                  </div>
+
+                  {/* Panel de Configuración de Promoción para la Receta / Plato */}
+                  <div className="bg-stone-900 border border-rose-500/30 rounded-2xl p-5 shadow-lg space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-stone-800">
+                      <div className="flex items-center gap-2.5">
+                        <div className="p-2 rounded-xl bg-rose-500/20 text-rose-400">
+                          <Sparkles className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h3 className="font-black text-white text-base">
+                              Promoción & Oferta Especial ({selectedPlato.Plato})
+                            </h3>
+                            {dishPromoActiva ? (
+                              <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[10px] font-black uppercase tracking-wider animate-pulse">
+                                Promo Activa
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-full bg-stone-800 text-stone-400 text-[10px] font-bold">
+                                Sin Promoción
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-stone-400 mt-0.5">
+                            Configura descuentos temporales, por días de semana o permanente. Se muestra con cinta diagonal y precio rebajado en POS y Menú.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center space-x-3 self-end sm:self-auto">
+                        <label className="flex items-center gap-2 cursor-pointer bg-stone-950 px-3 py-1.5 rounded-xl border border-stone-800 hover:border-rose-500/50 transition-colors">
+                          <input
+                            type="checkbox"
+                            checked={dishPromoActiva}
+                            onChange={(e) => setDishPromoActiva(e.target.checked)}
+                            className="w-4 h-4 accent-rose-500 rounded cursor-pointer"
+                          />
+                          <span className="text-xs font-bold text-stone-200">
+                            {dishPromoActiva ? 'Activar en Carta' : 'Desactivada'}
+                          </span>
+                        </label>
+
+                        <button
+                          type="button"
+                          onClick={handleSaveDishPromo}
+                          className="flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs transition-all shadow-md active:scale-95 cursor-pointer"
+                        >
+                          <Save className="w-3.5 h-3.5" />
+                          <span>Guardar Promo</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {dishPromoActiva && (
+                      <div className="space-y-4 pt-1 animate-in fade-in duration-200">
+                        {/* Selector Tipo de Promoción (% vs Precio Fijo) */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <button
+                            type="button"
+                            onClick={() => setDishPromoTipo('Porcentaje')}
+                            className={`p-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-2 cursor-pointer ${
+                              dishPromoTipo === 'Porcentaje'
+                                ? 'bg-rose-600 text-white shadow-md'
+                                : 'bg-stone-950 border border-stone-800 text-stone-400 hover:text-white'
+                            }`}
+                          >
+                            <Percent className="w-4 h-4" />
+                            <span>Porcentaje de Descuento (%)</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDishPromoTipo('PrecioFijo');
+                              if (dishPromoValor < 100 && selectedPlato.Precio > 0) {
+                                setDishPromoValor(Math.round(selectedPlato.Precio * 0.8));
+                              }
+                            }}
+                            className={`p-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-2 cursor-pointer ${
+                              dishPromoTipo === 'PrecioFijo'
+                                ? 'bg-rose-600 text-white shadow-md'
+                                : 'bg-stone-950 border border-stone-800 text-stone-400 hover:text-white'
+                            }`}
+                          >
+                            <DollarSign className="w-4 h-4" />
+                            <span>Precio Fijo Rebajado ($)</span>
+                          </button>
+                        </div>
+
+                        {/* Valor del Descuento & Botones de Rebaja Rápida */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+                          <div>
+                            <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider mb-1">
+                              {dishPromoTipo === 'Porcentaje' ? 'Porcentaje a descontar (%):' : 'Nuevo Precio Rebajado ($):'}
+                            </label>
+                            <div className="relative">
+                              <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400 font-bold">
+                                {dishPromoTipo === 'Porcentaje' ? '%' : '$'}
+                              </span>
+                              <input
+                                type="number"
+                                step="any"
+                                min="1"
+                                value={dishPromoValor || ''}
+                                onChange={(e) => setDishPromoValor(safeParsePrice(e.target.value))}
+                                className="w-full bg-stone-950 border border-stone-800 rounded-xl pl-8 pr-4 py-2.5 text-sm font-bold font-mono text-white focus:outline-none focus:border-rose-400"
+                              />
+                            </div>
+                          </div>
+
+                          <div>
+                            <span className="text-[10px] text-stone-400 uppercase font-bold block mb-1">
+                              Rebajas Rápidas con 1-Click:
+                            </span>
+                            <div className="flex flex-wrap gap-1.5">
+                              {[10, 15, 20, 25, 30, 50].map((pct) => (
+                                <button
+                                  key={pct}
+                                  type="button"
+                                  onClick={() => {
+                                    if (dishPromoTipo === 'Porcentaje') {
+                                      setDishPromoValor(pct);
+                                    } else {
+                                      const base = selectedPlato.Precio > 0 ? selectedPlato.Precio : 10000;
+                                      setDishPromoValor(Math.round(base * (1 - pct / 100)));
+                                    }
+                                  }}
+                                  className="px-2.5 py-1.5 bg-stone-950 hover:bg-stone-800 border border-stone-800 rounded-lg text-xs font-bold text-stone-300 hover:text-white transition-all active:scale-95 cursor-pointer"
+                                >
+                                  -{pct}%
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Vigencia / Días Programados */}
+                        <div className="p-3.5 bg-stone-950 rounded-xl border border-stone-800 space-y-3">
+                          <div>
+                            <span className="text-xs font-bold text-stone-300 uppercase tracking-wider block mb-1.5">
+                              Vigencia y Programación del Descuento:
+                            </span>
+                            <div className="grid grid-cols-3 gap-2">
+                              {(['Siempre', 'DiasSemana', 'Intervalo'] as const).map((v) => (
+                                <button
+                                  key={v}
+                                  type="button"
+                                  onClick={() => setDishPromoVigencia(v)}
+                                  className={`py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                                    dishPromoVigencia === v
+                                      ? 'bg-amber-500 text-stone-950 shadow-sm'
+                                      : 'bg-stone-900 border border-stone-800 text-stone-400 hover:text-white'
+                                  }`}
+                                >
+                                  {v === 'Siempre' ? 'Permanente' : v === 'DiasSemana' ? 'Días Específicos' : 'Intervalo de Fechas'}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Days of week */}
+                          {dishPromoVigencia === 'DiasSemana' && (
+                            <div className="space-y-1.5 pt-1">
+                              <span className="text-[11px] text-stone-400 font-semibold block">
+                                Días activos (en esos días se cruzará con la banda de promoción en el POS):
+                              </span>
+                              <div className="grid grid-cols-7 gap-1.5">
+                                {DIAS_SEMANA_MAP.map((d) => {
+                                  const isSelected = dishPromoDiasSemana.includes(d.id);
+                                  return (
+                                    <button
+                                      key={d.id}
+                                      type="button"
+                                      onClick={() => {
+                                        if (isSelected) {
+                                          setDishPromoDiasSemana(dishPromoDiasSemana.filter((x) => x !== d.id));
+                                        } else {
+                                          setDishPromoDiasSemana([...dishPromoDiasSemana, d.id]);
+                                        }
+                                      }}
+                                      className={`py-2 rounded-xl text-xs font-bold text-center transition-all cursor-pointer ${
+                                        isSelected
+                                          ? 'bg-rose-600 text-white shadow-md'
+                                          : 'bg-stone-900 text-stone-400 hover:text-white border border-stone-800'
+                                      }`}
+                                    >
+                                      {d.corto}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Date Interval */}
+                          {dishPromoVigencia === 'Intervalo' && (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                              <div>
+                                <label className="text-[10px] text-stone-400 uppercase font-bold block mb-1">
+                                  Fecha Inicio:
+                                </label>
+                                <input
+                                  type="date"
+                                  value={dishPromoFechaInicio}
+                                  onChange={(e) => setDishPromoFechaInicio(e.target.value)}
+                                  className="w-full bg-stone-900 border border-stone-800 rounded-xl px-3 py-2 text-xs text-white"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[10px] text-stone-400 uppercase font-bold block mb-1">
+                                  Fecha Fin:
+                                </label>
+                                <input
+                                  type="date"
+                                  value={dishPromoFechaFin}
+                                  onChange={(e) => setDishPromoFechaFin(e.target.value)}
+                                  className="w-full bg-stone-900 border border-stone-800 rounded-xl px-3 py-2 text-xs text-white"
+                                />
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Etiqueta opcional */}
+                          <div className="pt-1">
+                            <label className="text-[10px] text-stone-400 uppercase font-bold block mb-1">
+                              Texto de la Banda Promocional en POS (Opcional):
+                            </label>
+                            <input
+                              type="text"
+                              value={dishPromoEtiqueta}
+                              onChange={(e) => setDishPromoEtiqueta(e.target.value)}
+                              placeholder="ej: -20%, 2X1, MARTES DE POLLO, OFERTA"
+                              className="w-full bg-stone-900 border border-stone-800 rounded-xl px-3 py-2 text-xs text-white placeholder-stone-500 focus:outline-none focus:border-rose-400"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Impacto Financiero en Escandallo con Promoción */}
+                        {(() => {
+                          const basePrice = pricingAnalysis.precioActual;
+                          const foodCost = pricingAnalysis.costo;
+                          const preview = calculatePromoPrice(basePrice, {
+                            PromoActiva: dishPromoActiva,
+                            PromoTipo: dishPromoTipo,
+                            PromoValor: dishPromoValor,
+                            PromoVigencia: dishPromoVigencia,
+                            PromoFechaInicio: dishPromoFechaInicio,
+                            PromoFechaFin: dishPromoFechaFin,
+                            PromoDiasSemana: JSON.stringify(dishPromoDiasSemana),
+                            PromoEtiqueta: dishPromoEtiqueta,
+                          });
+                          const promoFinalPrice = preview.finalPrice;
+                          const promoMargenBruto = promoFinalPrice - foodCost;
+                          const promoMargenPct = promoFinalPrice > 0 ? (promoMargenBruto / promoFinalPrice) * 100 : 0;
+                          const promoFoodCostPct = promoFinalPrice > 0 ? (foodCost / promoFinalPrice) * 100 : 0;
+
+                          return (
+                            <div className="p-4 bg-stone-950 rounded-xl border border-stone-800 space-y-2">
+                              <span className="text-[11px] font-black uppercase tracking-wider text-rose-300 block">
+                                Impacto Financiero del Descuento en la Receta:
+                              </span>
+                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                <div className="bg-stone-900 p-2.5 rounded-lg border border-stone-800">
+                                  <span className="text-[10px] text-stone-400 uppercase block font-semibold">Precio Promocional</span>
+                                  <span className="text-base font-black text-emerald-400 font-mono">
+                                    ${promoFinalPrice.toLocaleString()}
+                                  </span>
+                                  <span className="text-[10px] text-stone-500 line-through block font-mono">
+                                    ${basePrice.toLocaleString()}
+                                  </span>
+                                </div>
+
+                                <div className="bg-stone-900 p-2.5 rounded-lg border border-stone-800">
+                                  <span className="text-[10px] text-stone-400 uppercase block font-semibold">Nuevo Margen Bruto</span>
+                                  <span className={`text-base font-black font-mono ${promoMargenBruto >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                    ${promoMargenBruto.toLocaleString()}
+                                  </span>
+                                  <span className="text-[10px] text-stone-500 block">ganancia por plato</span>
+                                </div>
+
+                                <div className="bg-stone-900 p-2.5 rounded-lg border border-stone-800">
+                                  <span className="text-[10px] text-stone-400 uppercase block font-semibold">Nuevo Margen %</span>
+                                  <span className={`text-base font-black font-mono ${promoMargenPct >= 40 ? 'text-emerald-400' : promoMargenPct >= 25 ? 'text-amber-400' : 'text-red-400'}`}>
+                                    {promoMargenPct.toFixed(1)}%
+                                  </span>
+                                  <span className="text-[10px] text-stone-500 block">sobre venta promo</span>
+                                </div>
+
+                                <div className="bg-stone-900 p-2.5 rounded-lg border border-stone-800">
+                                  <span className="text-[10px] text-stone-400 uppercase block font-semibold">Food Cost en Promo</span>
+                                  <span className="text-base font-black text-amber-400 font-mono">
+                                    {promoFoodCostPct.toFixed(1)}%
+                                  </span>
+                                  <span className="text-[10px] text-stone-500 block">materia prima</span>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    )}
                   </div>
 
                   {/* Bottom Panel: Direct Sale Product Info OR Recipe Builder */}
@@ -2570,6 +2974,257 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
                   </label>
                 </div>
               )}
+
+              {/* SECCIÓN DE PROMOCIÓN & OFERTA PARA EL INSUMO */}
+              <div className="p-4 rounded-2xl bg-stone-950/90 border border-rose-500/30 space-y-3.5 shadow-inner">
+                <div className="flex items-center justify-between pb-2 border-b border-stone-800">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 rounded-lg bg-rose-500/20 text-rose-400">
+                      <Sparkles className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                        <span>Promoción & Oferta Especial</span>
+                        {modalPromoActiva && (
+                          <span className="px-1.5 py-0.2 rounded text-[9px] font-black bg-rose-500 text-white">ACTIVA</span>
+                        )}
+                      </h4>
+                      <p className="text-[11px] text-stone-400">
+                        Aplica descuento con cinta cruzada en la imagen en el POS y Menú digital.
+                      </p>
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-2 cursor-pointer bg-stone-900 px-2.5 py-1 rounded-xl border border-stone-800">
+                    <input
+                      type="checkbox"
+                      checked={modalPromoActiva}
+                      onChange={(e) => setModalPromoActiva(e.target.checked)}
+                      className="w-4 h-4 accent-rose-500 rounded cursor-pointer"
+                    />
+                    <span className="text-xs font-bold text-stone-200">
+                      {modalPromoActiva ? 'Activar Promo' : 'Sin Promo'}
+                    </span>
+                  </label>
+                </div>
+
+                {modalPromoActiva && (
+                  <div className="space-y-3.5 animate-in fade-in duration-150">
+                    {/* Tipo de Descuento: Porcentaje vs Precio Fijo */}
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setModalPromoTipo('Porcentaje')}
+                        className={`py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-1.5 cursor-pointer ${
+                          modalPromoTipo === 'Porcentaje'
+                            ? 'bg-rose-600 text-white shadow-md'
+                            : 'bg-stone-900 border border-stone-800 text-stone-400 hover:text-white'
+                        }`}
+                      >
+                        <Percent className="w-3.5 h-3.5" />
+                        <span>Porcentaje (%)</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setModalPromoTipo('PrecioFijo');
+                          if (modalPromoValor < 100 && modalPrecioVenta > 0) {
+                            setModalPromoValor(Math.round(modalPrecioVenta * 0.8));
+                          }
+                        }}
+                        className={`py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-1.5 cursor-pointer ${
+                          modalPromoTipo === 'PrecioFijo'
+                            ? 'bg-rose-600 text-white shadow-md'
+                            : 'bg-stone-900 border border-stone-800 text-stone-400 hover:text-white'
+                        }`}
+                      >
+                        <DollarSign className="w-3.5 h-3.5" />
+                        <span>Precio Fijo ($)</span>
+                      </button>
+                    </div>
+
+                    {/* Valor del Descuento & Botones Rápidos */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
+                      <div>
+                        <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider mb-1">
+                          {modalPromoTipo === 'Porcentaje' ? 'Porcentaje de Rebaja (%):' : 'Nuevo Precio Rebajado ($):'}
+                        </label>
+                        <div className="relative">
+                          <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-500 font-bold">
+                            {modalPromoTipo === 'Porcentaje' ? '%' : '$'}
+                          </span>
+                          <input
+                            type="number"
+                            step="any"
+                            min="1"
+                            value={modalPromoValor || ''}
+                            onChange={(e) => setModalPromoValor(safeParsePrice(e.target.value))}
+                            className="w-full bg-stone-900 border border-stone-800 rounded-xl pl-8 pr-3 py-2 text-sm font-bold font-mono text-white focus:outline-none focus:border-rose-400"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Presets */}
+                      <div>
+                        <span className="text-[10px] text-stone-400 uppercase font-bold block mb-1">Descuentos Rápidos:</span>
+                        <div className="flex flex-wrap gap-1.5">
+                          {[10, 15, 20, 25, 30, 50].map((pct) => (
+                            <button
+                              key={pct}
+                              type="button"
+                              onClick={() => {
+                                if (modalPromoTipo === 'Porcentaje') {
+                                  setModalPromoValor(pct);
+                                } else {
+                                  const base = modalPrecioVenta > 0 ? modalPrecioVenta : 10000;
+                                  setModalPromoValor(Math.round(base * (1 - pct / 100)));
+                                }
+                              }}
+                              className="px-2 py-1 bg-stone-900 hover:bg-stone-800 border border-stone-800 rounded-lg text-xs font-bold text-stone-300 hover:text-white cursor-pointer active:scale-95"
+                            >
+                              -{pct}%
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Programación / Vigencia */}
+                    <div className="space-y-2">
+                      <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider">
+                        Programación / Días de Vigencia:
+                      </label>
+                      <div className="grid grid-cols-3 gap-2">
+                        {(['Siempre', 'DiasSemana', 'Intervalo'] as const).map((v) => (
+                          <button
+                            key={v}
+                            type="button"
+                            onClick={() => setModalPromoVigencia(v)}
+                            className={`py-1.5 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                              modalPromoVigencia === v
+                                ? 'bg-amber-500 text-stone-950 shadow-sm'
+                                : 'bg-stone-900 border border-stone-800 text-stone-400 hover:text-white'
+                            }`}
+                          >
+                            {v === 'Siempre' ? 'Permanente' : v === 'DiasSemana' ? 'Días Específicos' : 'Intervalo Fechas'}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Days of week selector */}
+                      {modalPromoVigencia === 'DiasSemana' && (
+                        <div className="p-2.5 rounded-xl bg-stone-900 border border-stone-800 space-y-1.5">
+                          <span className="text-[11px] text-stone-300 font-semibold block">
+                            Días activos (banda visible en POS esos días):
+                          </span>
+                          <div className="grid grid-cols-7 gap-1">
+                            {DIAS_SEMANA_MAP.map((d) => {
+                              const isSelected = modalPromoDiasSemana.includes(d.id);
+                              return (
+                                <button
+                                  key={d.id}
+                                  type="button"
+                                  onClick={() => {
+                                    if (isSelected) {
+                                      setModalPromoDiasSemana(modalPromoDiasSemana.filter((x) => x !== d.id));
+                                    } else {
+                                      setModalPromoDiasSemana([...modalPromoDiasSemana, d.id]);
+                                    }
+                                  }}
+                                  className={`py-1.5 rounded-lg text-xs font-bold text-center transition-all cursor-pointer ${
+                                    isSelected
+                                      ? 'bg-rose-600 text-white shadow-sm'
+                                      : 'bg-stone-950 text-stone-400 hover:text-white border border-stone-800'
+                                  }`}
+                                >
+                                  {d.corto}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Date range picker */}
+                      {modalPromoVigencia === 'Intervalo' && (
+                        <div className="grid grid-cols-2 gap-2 p-2.5 rounded-xl bg-stone-900 border border-stone-800">
+                          <div>
+                            <label className="text-[10px] text-stone-400 uppercase font-bold block mb-1">Fecha Inicio:</label>
+                            <input
+                              type="date"
+                              value={modalPromoFechaInicio}
+                              onChange={(e) => setModalPromoFechaInicio(e.target.value)}
+                              className="w-full bg-stone-950 border border-stone-800 rounded-lg px-2 py-1.5 text-xs text-white"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-stone-400 uppercase font-bold block mb-1">Fecha Fin:</label>
+                            <input
+                              type="date"
+                              value={modalPromoFechaFin}
+                              onChange={(e) => setModalPromoFechaFin(e.target.value)}
+                              className="w-full bg-stone-950 border border-stone-800 rounded-lg px-2 py-1.5 text-xs text-white"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Etiqueta personalizada */}
+                    <div>
+                      <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider mb-1">
+                        Texto de la Banda Promocional en POS (Opcional):
+                      </label>
+                      <input
+                        type="text"
+                        value={modalPromoEtiqueta}
+                        onChange={(e) => setModalPromoEtiqueta(e.target.value)}
+                        placeholder="ej: -20%, OFERTA, PROMO LUNES, 2X1"
+                        className="w-full bg-stone-900 border border-stone-800 rounded-xl px-3 py-2 text-xs text-white placeholder-stone-500 focus:outline-none focus:border-rose-400"
+                      />
+                    </div>
+
+                    {/* Resumen Financiero con Promoción */}
+                    {(() => {
+                      const base = modalPrecioVenta > 0 ? modalPrecioVenta : modalCostoUnitario * 2;
+                      const previewCalc = calculatePromoPrice(base, {
+                        PromoActiva: modalPromoActiva,
+                        PromoTipo: modalPromoTipo,
+                        PromoValor: modalPromoValor,
+                        PromoVigencia: modalPromoVigencia,
+                        PromoFechaInicio: modalPromoFechaInicio,
+                        PromoFechaFin: modalPromoFechaFin,
+                        PromoDiasSemana: JSON.stringify(modalPromoDiasSemana),
+                        PromoEtiqueta: modalPromoEtiqueta,
+                      });
+                      const promoMargen = previewCalc.finalPrice - modalCostoUnitario;
+                      const promoMargenPct = previewCalc.finalPrice > 0 ? (promoMargen / previewCalc.finalPrice) * 100 : 0;
+
+                      return (
+                        <div className="p-3 bg-stone-900 rounded-xl border border-stone-800 flex items-center justify-between text-xs">
+                          <div>
+                            <span className="text-stone-400 block text-[10px] uppercase font-bold">Precio con Descuento</span>
+                            <span className="text-base font-black text-emerald-400 font-mono">
+                              ${previewCalc.finalPrice.toLocaleString()}
+                            </span>
+                            {modalPrecioVenta > 0 && (
+                              <span className="text-[10px] text-stone-400 ml-1 line-through font-mono">
+                                ${modalPrecioVenta.toLocaleString()}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-right">
+                            <span className="text-stone-400 block text-[10px] uppercase font-bold">Margen en Promo</span>
+                            <span className={`font-mono font-black ${promoMargen >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                              ${promoMargen.toLocaleString()} ({promoMargenPct.toFixed(0)}%)
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+              </div>
               </div>
 
               {/* Sticky Footer Actions */}

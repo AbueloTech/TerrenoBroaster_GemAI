@@ -18,13 +18,31 @@ export type UbicacionMesa =
 
 export type EstadoComanda = 'Cocina' | 'Entregado' | 'Cobrado' | 'Anulado';
 
+export type TipoPromocion = 'Porcentaje' | 'PrecioFijo' | '2x1' | '3x1' | 'NxM';
+export type TamanoRacion = 'Normal' | 'Mediana' | 'Grande';
+
 export interface Plato {
   ID: number;
   Plato: string;
   Precio: number;
+  PrecioOriginal?: number;
   Categoria: string;
   Imagen: string; // e.g. "broaster_combo2.jpg"
   Descripcion?: string;
+  // Promociones
+  PromoActiva?: boolean;
+  PromoTipo?: TipoPromocion;
+  PromoValor?: number;
+  PromoNxMLleva?: number; // e.g. 2 for 2x1, 3 for 3x1 or 3x2
+  PromoNxMPaga?: number;  // e.g. 1 for 2x1, 1 for 3x1, 2 for 3x2
+  PromoVigencia?: 'Siempre' | 'Intervalo' | 'DiasSemana';
+  PromoFechaInicio?: string;
+  PromoFechaFin?: string;
+  PromoDiasSemana?: string; // JSON array string e.g. "[1,3,5]"
+  PromoEtiqueta?: string;
+  // Opciones de Ración
+  TamanoRacion?: TamanoRacion;
+  EsRacion?: boolean;
 }
 
 export interface Venta {
@@ -66,6 +84,7 @@ export interface CartItem {
   plato: Plato;
   cantidad: number;
   nota?: string;
+  tamanoRacion?: TamanoRacion;
 }
 
 export interface AcumuladoProducto {
@@ -141,6 +160,7 @@ export type InsumoCategoria =
   | 'Quesos & Lácteos'
   | 'Salsas & Condimentos'
   | 'Vegetales & Verduras'
+  | 'Raciones & Acompañamientos'
   | 'Bebidas (Venta Directa)'
   | 'Aceites & Grasas'
   | 'Empaques & Desechables'
@@ -153,6 +173,7 @@ export type UnidadMedida =
   | 'ml'
   | 'unidad'
   | 'porcion'
+  | 'racion'
   | 'botella'
   | 'lata'
   | 'paquete';
@@ -171,6 +192,20 @@ export interface Insumo {
   EsVentaDirecta?: boolean; // True si es un producto terminado que se vende directo (ej: refrescos, agua)
   PlatoId?: number; // Vínculo opcional a un Plato de venta directa
   UltimaActualizacion?: string;
+  // Promociones para productos de venta directa
+  PromoActiva?: boolean;
+  PromoTipo?: TipoPromocion;
+  PromoValor?: number;
+  PromoNxMLleva?: number;
+  PromoNxMPaga?: number;
+  PromoVigencia?: 'Siempre' | 'Intervalo' | 'DiasSemana';
+  PromoFechaInicio?: string;
+  PromoFechaFin?: string;
+  PromoDiasSemana?: string; // JSON array string
+  PromoEtiqueta?: string;
+  // Opciones de Ración
+  EsRacion?: boolean;
+  TamanoRacionDefecto?: TamanoRacion;
 }
 
 export interface RecetaItem {
@@ -203,6 +238,20 @@ export interface PlatoEscandallo {
   TieneReceta: boolean;
   EsVentaDirecta?: boolean;
   InsumoId?: number;
+  // Promociones vinculadas
+  PromoActiva?: boolean;
+  PromoTipo?: TipoPromocion;
+  PromoValor?: number;
+  PromoNxMLleva?: number;
+  PromoNxMPaga?: number;
+  PromoVigencia?: 'Siempre' | 'Intervalo' | 'DiasSemana';
+  PromoFechaInicio?: string;
+  PromoFechaFin?: string;
+  PromoDiasSemana?: string;
+  PromoEtiqueta?: string;
+  PrecioPromoActual?: number;
+  MargenPromoBruto?: number;
+  MargenPromoPorcentaje?: number;
 }
 
 export interface Proveedor {

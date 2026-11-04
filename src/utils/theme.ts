@@ -19,7 +19,7 @@ export const applyTheme = (theme: AppTheme): void => {
     root.classList.add('theme-light');
     root.classList.remove('theme-dark');
     root.setAttribute('data-theme', 'light');
-    document.body.style.backgroundColor = '#f8fafc';
+    document.body.style.backgroundColor = '#e2e8f0';
     document.body.style.color = '#0f172a';
   } else {
     root.classList.add('theme-dark');

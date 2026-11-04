@@ -4,6 +4,7 @@ import { imageService } from '../services/imageService';
 import { sqliteService } from '../db/sqliteService';
 import { menuSyncService } from '../services/menuSyncService';
 import { formatPrice, safeParsePrice } from '../utils/currency';
+import { calculatePromoPrice } from '../utils/promo';
 import {
   Plus,
   Pencil,
@@ -135,7 +136,7 @@ export const PlatosView: React.FC<PlatosViewProps> = ({ platos, onRefresh, onOpe
     try {
       if (editingPlato) {
         sqliteService.updatePlato({
-          ID: editingPlato.ID,
+          ...editingPlato,
           Plato: formData.Plato.trim(),
           Precio: precioNum,
           Categoria: finalCategory,
@@ -322,6 +323,7 @@ export const PlatosView: React.FC<PlatosViewProps> = ({ platos, onRefresh, onOpe
               <tbody className="divide-y divide-stone-800/80">
                 {filteredPlatos.map((plato) => {
                   const imgUrl = imageService.getImageUrl(plato.Imagen, plato.Categoria, plato.Plato, plato.ID);
+                  const promo = calculatePromoPrice(plato);
                   return (
                     <tr key={plato.ID} className="hover:bg-stone-800/50 transition-colors">
                       <td className="py-3 px-4 font-mono font-bold text-amber-500">#{plato.ID}</td>
@@ -336,10 +338,22 @@ export const PlatosView: React.FC<PlatosViewProps> = ({ platos, onRefresh, onOpe
                         />
                       </td>
                       <td className="py-3 px-4 font-semibold text-stone-100 max-w-xs">
-                        <div>{plato.Plato}</div>
+                        <div className="flex items-center space-x-2">
+                          <span>{plato.Plato}</span>
+                          {promo.isPromoActive && (
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/30 shrink-0">
+                              🔥 {promo.badgeLabel}
+                            </span>
+                          )}
+                        </div>
                         {plato.Descripcion && (
                           <div className="text-[11px] text-stone-400 font-normal line-clamp-2 mt-0.5">
                             {plato.Descripcion}
+                          </div>
+                        )}
+                        {promo.isPromoActive && (
+                          <div className="text-[10px] text-red-400/90 font-medium mt-0.5">
+                            Vigencia: {promo.detailSchedule}
                           </div>
                         )}
                       </td>
@@ -357,8 +371,21 @@ export const PlatosView: React.FC<PlatosViewProps> = ({ platos, onRefresh, onOpe
                           <span className="text-stone-600 italic">Sin imagen asignada</span>
                         )}
                       </td>
-                      <td className="py-3 px-4 text-right font-black text-sm text-stone-100">
-                        {formatPrice(plato.Precio)}
+                      <td className="py-3 px-4 text-right">
+                        {promo.isPromoActive ? (
+                          <div className="flex flex-col items-end">
+                            <span className="font-black text-sm text-amber-400">
+                              {formatPrice(promo.finalPrice)}
+                            </span>
+                            <span className="text-[11px] line-through text-stone-500">
+                              {formatPrice(promo.basePrice)}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="font-black text-sm text-stone-100">
+                            {formatPrice(plato.Precio)}
+                          </span>
+                        )}
                       </td>
                       <td className="py-3 px-4 text-center">
                         <div className="flex items-center justify-center space-x-1.5">
@@ -388,13 +415,14 @@ export const PlatosView: React.FC<PlatosViewProps> = ({ platos, onRefresh, onOpe
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
           {filteredPlatos.map((plato) => {
-            const imgUrl = imageService.getImageUrl(plato.Imagen, plato.Categoria);
+            const imgUrl = imageService.getImageUrl(plato.Imagen, plato.Categoria, plato.Plato, plato.ID);
+            const promo = calculatePromoPrice(plato);
             return (
               <div
                 key={plato.ID}
-                className="bg-stone-900 border border-stone-800 rounded-2xl overflow-hidden flex flex-col justify-between"
+                className="bg-stone-900 border border-stone-800 rounded-2xl overflow-hidden flex flex-col justify-between relative"
               >
-                <div className="relative h-40 bg-stone-950">
+                <div className="relative h-40 bg-stone-950 overflow-hidden">
                   <img
                     src={imgUrl}
                     alt={plato.Plato}
@@ -403,17 +431,37 @@ export const PlatosView: React.FC<PlatosViewProps> = ({ platos, onRefresh, onOpe
                       (e.target as HTMLImageElement).src = imageService.getFallbackForCategory(plato.Categoria);
                     }}
                   />
-                  <span className="absolute top-2 left-2 text-[10px] font-bold bg-stone-950/80 backdrop-blur-sm text-amber-400 px-2 py-0.5 rounded">
+                  {/* Diagonal Promo Ribbon */}
+                  {promo.isPromoActive && (
+                    <div className="absolute -top-1 -right-1 w-24 h-24 overflow-hidden pointer-events-none z-10">
+                      <div className="absolute transform rotate-45 bg-gradient-to-r from-red-600 to-amber-500 text-white font-black text-[9px] py-1 right-[-32px] top-[16px] w-[115px] text-center shadow-lg uppercase tracking-wider">
+                        🔥 {promo.badgeLabel}
+                      </div>
+                    </div>
+                  )}
+                  <span className="absolute top-2 left-2 text-[10px] font-bold bg-stone-950/80 backdrop-blur-sm text-amber-400 px-2 py-0.5 rounded z-10">
                     {plato.Categoria}
                   </span>
-                  <span className="absolute bottom-2 right-2 text-xs font-black bg-stone-950/90 text-amber-400 px-2 py-1 rounded">
-                    {formatPrice(plato.Precio)}
-                  </span>
+                  <div className="absolute bottom-2 right-2 flex flex-col items-end z-10">
+                    {promo.isPromoActive && (
+                      <span className="text-[9px] line-through text-stone-300 bg-stone-950/90 px-1 rounded mb-0.5">
+                        {formatPrice(promo.basePrice)}
+                      </span>
+                    )}
+                    <span className="text-xs font-black bg-stone-950/90 text-amber-400 px-2 py-0.5 rounded shadow">
+                      {formatPrice(promo.finalPrice)}
+                    </span>
+                  </div>
                 </div>
 
                 <div className="p-4 flex-1 flex flex-col justify-between">
                   <div>
                     <h4 className="font-semibold text-stone-100 text-sm">{plato.Plato}</h4>
+                    {promo.isPromoActive && (
+                      <p className="text-[10px] text-red-400 font-medium mt-1">
+                        🔥 Promo activa ({promo.detailSchedule})
+                      </p>
+                    )}
                     {plato.Descripcion ? (
                       <p className="text-xs text-stone-300/90 mt-1 line-clamp-2 leading-snug">
                         {plato.Descripcion}

@@ -10,28 +10,28 @@
 }
 
 /* ==========================================================================
-   LIGHT THEME OVERRIDES (Modo Claro Gastronómico)
+   LIGHT THEME OVERRIDES (Modo Claro Gastronómico Mate / Grisáceo Anti-Reflejo)
    ========================================================================== */
 html.theme-light,
 [data-theme="light"] {
-  --color-stone-950: #f8fafc; /* Canvas background: light, warm clean slate */
-  --color-stone-900: #ffffff; /* Panels, cards, header, sidebar: crisp pure white */
-  --color-stone-850: #f1f5f9;
-  --color-stone-800: #e2e8f0; /* Borders, subtle item fills, inactive buttons */
-  --color-stone-700: #cbd5e1; /* Dividers */
-  --color-stone-600: #94a3b8; /* Muted hints */
-  --color-stone-500: #64748b; /* Placeholders, icons */
-  --color-stone-400: #475569; /* Secondary text */
-  --color-stone-300: #334155; /* Normal text */
-  --color-stone-200: #1e293b; /* Strong text */
-  --color-stone-100: #0f172a; /* Deep charcoal text for main headers */
-  --color-stone-50: #020617;
+  --color-stone-950: #e2e8f0; /* Fondo principal de la app: grisáceo suave neutro, cero deslumbramiento */
+  --color-stone-900: #f8fafc; /* Tarjetas, paneles y modales: blanco roto cálido con relieve */
+  --color-stone-850: #e2e8f0;
+  --color-stone-800: #cbd5e1; /* Botones secundarios e inputs con relleno diferenciado */
+  --color-stone-700: #94a3b8; /* Contornos y bordes bien definidos */
+  --color-stone-600: #64748b;
+  --color-stone-500: #475569;
+  --color-stone-400: #334155; /* Labels y textos secundarios perfectamente legibles */
+  --color-stone-300: #1e293b; /* Texto regular */
+  --color-stone-200: #0f172a; /* Texto destacado */
+  --color-stone-100: #020617; /* Títulos principales */
+  --color-stone-50: #000000;
   
   color-scheme: light;
 }
 
 html.theme-light body {
-  background-color: #f8fafc !important;
+  background-color: #e2e8f0 !important;
   color: #0f172a !important;
 }
 
@@ -49,51 +49,53 @@ html.theme-light .text-stone-200 {
 }
 
 html.theme-light .text-stone-300 {
-  color: #334155 !important;
+  color: #1e293b !important;
 }
 
 html.theme-light .text-stone-400 {
+  color: #334155 !important; /* Más oscuro para que ningún label se pierda */
+}
+
+html.theme-light .text-stone-500 {
   color: #475569 !important;
 }
 
 /* Background overrides in light mode */
 html.theme-light .bg-stone-950 {
-  background-color: #f8fafc !important;
+  background-color: #e2e8f0 !important; /* Fondo grisáceo descansado para los ojos */
 }
 
 html.theme-light .bg-stone-900 {
-  background-color: #ffffff !important;
+  background-color: #f8fafc !important; /* Blanco hueso/marfil suave */
 }
 
 html.theme-light .bg-stone-800 {
-  background-color: #f1f5f9 !important;
+  background-color: #e2e8f0 !important; /* Botones secundarios con contorno y fondo diferenciado */
 }
 
+html.theme-light .bg-stone-800:hover {
+  background-color: #cbd5e1 !important;
+}
+
+/* Contornos y Bordes Marcados para que nada se pierda ni se desvanezca */
 html.theme-light .border-stone-800 {
-  border-color: #e2e8f0 !important;
+  border-color: #94a3b8 !important; /* Borde gris nítido y visible */
 }
 
 html.theme-light .border-stone-700 {
-  border-color: #cbd5e1 !important;
+  border-color: #64748b !important; /* Bordes más destacados */
 }
 
-/* High contrast for Amber accents in light mode */
-html.theme-light .text-amber-400,
-html.theme-light .text-amber-300 {
-  color: #d97706 !important; /* Deep rich amber for sharp contrast on white */
+/* Tarjetas y Contenedores: borde visible y sombra suave */
+html.theme-light .bg-stone-900 {
+  border-color: #94a3b8 !important;
+  box-shadow: 0 1px 3px 0 rgba(15, 23, 42, 0.08), 0 1px 2px -1px rgba(15, 23, 42, 0.06) !important;
 }
 
-/* Amber buttons: always bold dark text for high contrast */
-html.theme-light .bg-amber-500,
-html.theme-light .bg-amber-400,
-html.theme-light .bg-amber-300 {
-  color: #0c0a09 !important;
-}
-
-html.theme-light .bg-amber-500 *,
-html.theme-light .bg-amber-400 *,
-html.theme-light .bg-amber-300 * {
-  color: #0c0a09 !important;
+/* Labels de formularios y títulos en modo claro */
+html.theme-light label {
+  color: #1e293b !important;
+  font-weight: 700 !important;
 }
 
 /* Input, select, and textarea fields in light mode */
@@ -102,23 +104,50 @@ html.theme-light select,
 html.theme-light textarea {
   background-color: #ffffff !important;
   color: #0f172a !important;
-  border-color: #cbd5e1 !important;
+  border: 1.5px solid #94a3b8 !important;
+}
+
+html.theme-light input:focus,
+html.theme-light select:focus,
+html.theme-light textarea:focus {
+  border-color: #d97706 !important;
+  box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.2) !important;
 }
 
 html.theme-light input::placeholder,
 html.theme-light textarea::placeholder {
-  color: #94a3b8 !important;
+  color: #64748b !important;
+}
+
+/* High contrast for Amber accents in light mode */
+html.theme-light .text-amber-400,
+html.theme-light .text-amber-300 {
+  color: #b45309 !important; /* Ámbar tostado de alto contraste */
+}
+
+/* Amber buttons: always bold dark text with defined border for high contrast */
+html.theme-light .bg-amber-500,
+html.theme-light .bg-amber-400,
+html.theme-light .bg-amber-300 {
+  color: #0c0a09 !important;
+  border: 1px solid #d97706 !important;
+}
+
+html.theme-light .bg-amber-500 *,
+html.theme-light .bg-amber-400 *,
+html.theme-light .bg-amber-300 * {
+  color: #0c0a09 !important;
 }
 
 /* Soft, clean card shadows for light mode */
 html.theme-light .shadow-xl,
 html.theme-light .shadow-2xl {
-  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.08), 0 8px 10px -6px rgba(15, 23, 42, 0.04) !important;
+  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.12), 0 8px 10px -6px rgba(15, 23, 42, 0.08) !important;
 }
 
 html.theme-light .shadow-md,
 html.theme-light .shadow-lg {
-  box-shadow: 0 4px 6px -1px rgba(15, 23, 42, 0.07), 0 2px 4px -2px rgba(15, 23, 42, 0.04) !important;
+  box-shadow: 0 4px 6px -1px rgba(15, 23, 42, 0.1), 0 2px 4px -2px rgba(15, 23, 42, 0.06) !important;
 }
 
 @media print {
