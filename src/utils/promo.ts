@@ -226,6 +226,8 @@ export function calculatePromoPrice(
 export interface LineItemCalculation {
   total: number;
   baseTotal: number;
+  unitPrice: number;
+  paidUnits: number;
   discountTotal: number;
   isPromoApplied: boolean;
   freeUnits: number;
@@ -252,6 +254,8 @@ export function calculateLineItemTotal(
     return {
       total: baseTotal,
       baseTotal,
+      unitPrice: cleanBase,
+      paidUnits: qty,
       discountTotal: 0,
       isPromoApplied: false,
       freeUnits: 0,
@@ -269,6 +273,7 @@ export function calculateLineItemTotal(
     const freeUnits = qty - paidUnits;
     const total = paidUnits * cleanBase;
     const discountTotal = freeUnits * cleanBase;
+    const unitPrice = qty > 0 ? Math.round((total / qty) * 100) / 100 : cleanBase;
 
     let promoNotice = '';
     if (freeUnits > 0) {
@@ -280,6 +285,8 @@ export function calculateLineItemTotal(
     return {
       total,
       baseTotal,
+      unitPrice,
+      paidUnits,
       discountTotal,
       isPromoApplied: freeUnits > 0,
       freeUnits,
@@ -295,6 +302,8 @@ export function calculateLineItemTotal(
   return {
     total,
     baseTotal,
+    unitPrice: promo.finalPrice,
+    paidUnits: qty,
     discountTotal,
     isPromoApplied: true,
     freeUnits: 0,

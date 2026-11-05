@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { Plato, CartItem, FormaPago, Venta, DetalleVenta, TipoServicio, UbicacionMesa, Comanda } from '../types';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Plato, CartItem, FormaPago, Venta, DetalleVenta, TipoServicio, UbicacionMesa, Comanda, TamanoRacion } from '../types';
 import { imageService } from '../services/imageService';
 import { sqliteService } from '../db/sqliteService';
 import { formatPrice, safeParsePrice } from '../utils/currency';
 import { kitchenPrinterService } from '../services/kitchenPrinterService';
-import { calculatePromoPrice } from '../utils/promo';
+import { calculatePromoPrice, calculateLineItemTotal } from '../utils/promo';
 import confetti from 'canvas-confetti';
 import {
   Search,
@@ -160,35 +160,73 @@ export const POSView: React.FC<POSViewProps> = ({
     }
   };
 
+  // Helper to calculate line item promo breakdown (handles 2x1, 3x1, NxM and discounts)
+  const getLineItemCalc = (item: CartItem) => {
+    const basePrice = item.plato.PrecioOriginal || item.plato.Precio;
+    return calculateLineItemTotal(basePrice, item.cantidad, item.plato);
+  };
+
   // Cart operations
-  const addToCart = (plato: Plato) => {
+  const addToCart = (plato: Plato, tamano?: TamanoRacion, customQty = 1) => {
     playBeep(700, 0.06);
-    const promo = calculatePromoPrice(plato.Precio, plato);
-    const effectivePlato: Plato = promo.isPromoActive
-      ? {
-          ...plato,
-          Precio: promo.finalPrice,
-          PrecioOriginal: promo.basePrice,
-        }
-      : plato;
+
+    let effectiveBasePrice = plato.Precio;
+    let effectivePlato: Plato = { ...plato };
+
+    if (tamano && tamano !== 'Normal') {
+      const factor = tamano === 'Mediana' ? 1.5 : 2.2;
+      effectiveBasePrice = Math.round(plato.Precio * factor * 100) / 100;
+      effectivePlato = {
+        ...plato,
+        Plato: `${plato.Plato} (${tamano})`,
+        Precio: effectiveBasePrice,
+        TamanoRacion: tamano,
+      };
+    } else if (tamano === 'Normal') {
+      effectivePlato = {
+        ...plato,
+        Plato: plato.Plato.includes('(') ? plato.Plato : `${plato.Plato} (Normal)`,
+        TamanoRacion: 'Normal',
+      };
+    }
+
+    const promo = calculatePromoPrice(effectiveBasePrice, plato);
+    if (promo.isPromoActive) {
+      effectivePlato = {
+        ...effectivePlato,
+        Precio: promo.finalPrice,
+        PrecioOriginal: promo.basePrice,
+      };
+    }
+
+    const targetSize = tamano || plato.TamanoRacion || 'Normal';
 
     setCart((prev) => {
-      const existing = prev.find((item) => item.plato.ID === plato.ID);
-      if (existing) {
-        return prev.map((item) =>
-          item.plato.ID === plato.ID ? { ...item, plato: effectivePlato, cantidad: item.cantidad + 1 } : item
+      const existingIdx = prev.findIndex(
+        (item) => item.plato.ID === plato.ID && (item.tamanoRacion || 'Normal') === targetSize
+      );
+      if (existingIdx >= 0) {
+        return prev.map((item, idx) =>
+          idx === existingIdx ? { ...item, plato: effectivePlato, cantidad: item.cantidad + customQty } : item
         );
       }
-      return [...prev, { plato: effectivePlato, cantidad: 1 }];
+      return [
+        ...prev,
+        {
+          plato: effectivePlato,
+          cantidad: customQty,
+          tamanoRacion: targetSize,
+        },
+      ];
     });
   };
 
-  const updateQuantity = (platoId: number, delta: number) => {
+  const updateQuantity = (cartIndex: number, delta: number) => {
     playBeep(delta > 0 ? 750 : 500, 0.05);
     setCart((prev) => {
       return prev
-        .map((item) => {
-          if (item.plato.ID === platoId) {
+        .map((item, idx) => {
+          if (idx === cartIndex) {
             const newQty = item.cantidad + delta;
             return newQty > 0 ? { ...item, cantidad: newQty } : null;
           }
@@ -198,19 +236,89 @@ export const POSView: React.FC<POSViewProps> = ({
     });
   };
 
-  const removeFromCart = (platoId: number) => {
+  const removeFromCart = (cartIndex: number) => {
     playBeep(400, 0.08);
-    setCart((prev) => prev.filter((item) => item.plato.ID !== platoId));
+    setCart((prev) => prev.filter((_, idx) => idx !== cartIndex));
   };
 
   const clearCart = () => {
     setCart([]);
   };
 
-  const totalAmount = cart.reduce(
-    (sum, item) => sum + safeParsePrice(item.plato.Precio) * item.cantidad,
-    0
-  );
+  // Authoritative total calculation using bundle/line-item promo logic (2x1, 3x1, NxM)
+  const totalAmount = cart.reduce((sum, item) => sum + getLineItemCalc(item).total, 0);
+
+  // Smart Chicken Detection & Ración Suggestion
+  const chickenComboInCart = useMemo(() => {
+    for (const item of cart) {
+      const name = (item.plato.Plato || '').toLowerCase();
+      const desc = (item.plato.Descripcion || '').toLowerCase();
+      const cat = (item.plato.Categoria || '').toLowerCase();
+      const fullText = `${name} ${desc} ${cat}`;
+
+      if (
+        fullText.includes('pollo') ||
+        fullText.includes('broaster') ||
+        fullText.includes('presa') ||
+        fullText.includes('ala') ||
+        fullText.includes('combo')
+      ) {
+        if (
+          fullText.includes('8') ||
+          fullText.includes('10') ||
+          fullText.includes('12') ||
+          fullText.includes('familiar') ||
+          fullText.includes('entero') ||
+          item.cantidad >= 4
+        ) {
+          return {
+            chickenName: item.plato.Plato,
+            recommendedSize: 'Grande' as TamanoRacion,
+            label: 'Combo Familiar de Pollo detectado',
+            description: 'Sugerida: Ración Grande para acompañar 8+ presas o grupo.',
+          };
+        } else if (
+          fullText.includes('3') ||
+          fullText.includes('4') ||
+          fullText.includes('pareja') ||
+          fullText.includes('medio') ||
+          item.cantidad >= 2
+        ) {
+          return {
+            chickenName: item.plato.Plato,
+            recommendedSize: 'Mediana' as TamanoRacion,
+            label: 'Combo Pareja de Pollo detectado',
+            description: 'Sugerida: Ración Mediana ideal para 3 a 4 presas.',
+          };
+        } else {
+          return {
+            chickenName: item.plato.Plato,
+            recommendedSize: 'Normal' as TamanoRacion,
+            label: 'Pollo Individual detectado',
+            description: 'Sugerida: Ración Normal para 1 a 2 presas.',
+          };
+        }
+      }
+    }
+    return null;
+  }, [cart]);
+
+  // Available raciones in catalog
+  const availableRaciones = useMemo(() => {
+    return (platos || []).filter((p) => {
+      const cat = (p.Categoria || '').toLowerCase();
+      const name = (p.Plato || '').toLowerCase();
+      return (
+        Boolean(p.EsRacion) ||
+        cat.includes('racion') ||
+        cat.includes('acompaña') ||
+        name.includes('papas') ||
+        name.includes('ensalada') ||
+        name.includes('arepa') ||
+        name.includes('yuca')
+      );
+    });
+  }, [platos]);
 
   const numMontoRecibido = safeParsePrice(montoRecibido);
   const vuelto = numMontoRecibido > totalAmount ? numMontoRecibido - totalAmount : 0;
@@ -526,6 +634,52 @@ export const POSView: React.FC<POSViewProps> = ({
 
         {/* Dishes Grid */}
         <div className="flex-1 overflow-y-auto p-4 scrollbar-thin">
+          {/* Smart Chicken Combo Accompaniment Recommendation Banner */}
+          {chickenComboInCart && availableRaciones.length > 0 && (
+            <div className="mb-4 p-3.5 rounded-2xl bg-gradient-to-r from-amber-500/15 via-orange-500/15 to-stone-900 border border-amber-500/40 shadow-lg animate-in fade-in duration-200 space-y-2">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center space-x-2">
+                  <span className="text-xl">🍗</span>
+                  <div>
+                    <h4 className="text-xs font-black text-amber-300 uppercase tracking-wider">
+                      {chickenComboInCart.label}
+                    </h4>
+                    <p className="text-[11px] text-stone-300">
+                      {chickenComboInCart.description}
+                    </p>
+                  </div>
+                </div>
+                <span className="px-2.5 py-1 rounded-full bg-amber-500 text-stone-950 font-black text-[10px] uppercase tracking-wider">
+                  Sugerencia Ración {chickenComboInCart.recommendedSize}
+                </span>
+              </div>
+
+              <div className="flex flex-wrap gap-2 pt-1 border-t border-amber-500/20">
+                {availableRaciones.slice(0, 4).map((rac) => {
+                  const factor =
+                    chickenComboInCart.recommendedSize === 'Normal'
+                      ? 1.0
+                      : chickenComboInCart.recommendedSize === 'Mediana'
+                      ? 1.5
+                      : 2.2;
+                  const racPrice = Math.round(rac.Precio * factor * 100) / 100;
+                  return (
+                    <button
+                      key={rac.ID}
+                      type="button"
+                      onClick={() => addToCart(rac, chickenComboInCart.recommendedSize, 1)}
+                      className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-stone-950 hover:bg-amber-500 hover:text-stone-950 border border-amber-500/40 text-xs font-bold text-stone-200 transition-all shadow-sm active:scale-95 cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5 text-amber-400 group-hover:text-stone-950" />
+                      <span>+ {rac.Plato} ({chickenComboInCart.recommendedSize})</span>
+                      <span className="font-mono text-amber-300 font-black ml-1">{formatPrice(racPrice)}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {platos.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-80 text-center max-w-md mx-auto space-y-3">
               <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
@@ -549,6 +703,15 @@ export const POSView: React.FC<POSViewProps> = ({
               {filteredPlatos.map((plato) => {
                 const inCart = cart.find((i) => i.plato.ID === plato.ID);
                 const promo = calculatePromoPrice(plato.Precio, plato);
+                const isRacionItem = Boolean(
+                  plato.EsRacion ||
+                  (plato.Categoria || '').toLowerCase().includes('racion') ||
+                  (plato.Categoria || '').toLowerCase().includes('acompaña') ||
+                  (plato.Plato || '').toLowerCase().includes('papas') ||
+                  (plato.Plato || '').toLowerCase().includes('ensalada') ||
+                  (plato.Plato || '').toLowerCase().includes('arepa') ||
+                  (plato.Plato || '').toLowerCase().includes('yuca')
+                );
 
                 return (
                   <div
@@ -607,6 +770,49 @@ export const POSView: React.FC<POSViewProps> = ({
                           </p>
                         )}
                       </div>
+
+                      {/* Size & Quantity Selectors for Raciones (Normal, Mediana, Grande) */}
+                      {isRacionItem && (
+                        <div className="mt-2.5 pt-2 border-t border-stone-800/80 space-y-1.5" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center justify-between text-[10px] text-amber-400 font-bold uppercase tracking-wider">
+                            <span>Tamaños de Ración:</span>
+                          </div>
+                          <div className="grid grid-cols-3 gap-1">
+                            {(['Normal', 'Mediana', 'Grande'] as const).map((tam) => {
+                              const factor = tam === 'Normal' ? 1.0 : tam === 'Mediana' ? 1.5 : 2.2;
+                              const tamPrice = Math.round(plato.Precio * factor * 100) / 100;
+                              return (
+                                <button
+                                  key={tam}
+                                  type="button"
+                                  onClick={() => addToCart(plato, tam, 1)}
+                                  className="py-1 px-1 bg-stone-950 hover:bg-amber-500 hover:text-stone-950 border border-stone-800 hover:border-amber-400 rounded-lg text-center transition-all cursor-pointer text-stone-200"
+                                  title={`Pedir 1 ración ${tam} (${formatPrice(tamPrice)})`}
+                                >
+                                  <span className="text-[10px] font-bold block">{tam}</span>
+                                  <span className="text-[9px] font-mono text-amber-300 block font-bold">{formatPrice(tamPrice)}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <div className="flex items-center justify-between text-[10px] text-stone-400 pt-0.5">
+                            <span>Por cantidad:</span>
+                            <div className="flex items-center space-x-1">
+                              {[1, 2, 3].map((qty) => (
+                                <button
+                                  key={qty}
+                                  type="button"
+                                  onClick={() => addToCart(plato, plato.TamanoRacion || 'Normal', qty)}
+                                  className="px-1.5 py-0.5 rounded bg-stone-800 hover:bg-amber-500 hover:text-stone-950 text-stone-300 font-bold text-[9px] transition-colors cursor-pointer"
+                                  title={`Agregar ${qty} raciones`}
+                                >
+                                  +{qty} rac.
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      )}
 
                       <div className="mt-3 flex items-center justify-between pt-2 border-t border-stone-800/80">
                         {promo.isPromoActive ? (
@@ -879,12 +1085,14 @@ export const POSView: React.FC<POSViewProps> = ({
               </p>
             </div>
           ) : (
-            cart.map((item) => {
-              const itemPrice = safeParsePrice(item.plato.Precio);
-              const itemTotal = itemPrice * item.cantidad;
+            cart.map((item, cartIdx) => {
+              const basePrice = item.plato.PrecioOriginal || item.plato.Precio;
+              const lineCalc = calculateLineItemTotal(basePrice, item.cantidad, item.plato);
+              const itemTotal = lineCalc.total;
+
               return (
                 <div
-                  key={item.plato.ID}
+                  key={`${item.plato.ID}-${item.tamanoRacion || 'default'}-${cartIdx}`}
                   className="bg-stone-950/70 border border-stone-800 rounded-xl p-3 flex items-center space-x-3"
                 >
                   <img
@@ -901,35 +1109,45 @@ export const POSView: React.FC<POSViewProps> = ({
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center space-x-1.5 truncate">
                       <h5 className="text-xs font-semibold text-stone-200 truncate">{item.plato.Plato}</h5>
-                      {item.plato.PrecioOriginal && item.plato.PrecioOriginal > itemPrice && (
+                      {item.tamanoRacion && (
+                        <span className="shrink-0 text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                          {item.tamanoRacion}
+                        </span>
+                      )}
+                      {lineCalc.isPromoApplied && (
                         <span className="shrink-0 text-[9px] font-black px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30">
-                          🔥 PROMO
+                          🔥 {lineCalc.badgeLabel}
                         </span>
                       )}
                     </div>
                     <div className="flex items-center space-x-1.5 text-[11px] font-mono">
-                      <span className={item.plato.PrecioOriginal && item.plato.PrecioOriginal > itemPrice ? 'text-emerald-400 font-bold' : 'text-stone-400'}>
-                        {formatPrice(itemPrice)} c/u
+                      <span className={lineCalc.isPromoApplied ? 'text-emerald-400 font-bold' : 'text-stone-400'}>
+                        {formatPrice(lineCalc.unitPrice)} c/u
                       </span>
-                      {item.plato.PrecioOriginal && item.plato.PrecioOriginal > itemPrice && (
+                      {lineCalc.isPromoApplied && item.plato.PrecioOriginal && item.plato.PrecioOriginal > lineCalc.unitPrice && (
                         <span className="text-stone-500 line-through text-[10px]">
                           {formatPrice(item.plato.PrecioOriginal)}
                         </span>
                       )}
                     </div>
+                    {lineCalc.freeUnits > 0 && (
+                      <span className="text-[10px] text-amber-400 font-bold block leading-tight">
+                        {lineCalc.promoNotice}
+                      </span>
+                    )}
                   </div>
 
                   <div className="flex items-center space-x-1.5 shrink-0">
                     <button
-                      onClick={() => updateQuantity(item.plato.ID, -1)}
-                      className="w-6 h-6 rounded-md bg-stone-800 hover:bg-stone-700 text-stone-300 flex items-center justify-center"
+                      onClick={() => updateQuantity(cartIdx, -1)}
+                      className="w-6 h-6 rounded-md bg-stone-800 hover:bg-stone-700 text-stone-300 flex items-center justify-center cursor-pointer"
                     >
                       <Minus className="w-3 h-3" />
                     </button>
                     <span className="w-6 text-center text-xs font-bold text-stone-100">{item.cantidad}</span>
                     <button
-                      onClick={() => updateQuantity(item.plato.ID, 1)}
-                      className="w-6 h-6 rounded-md bg-stone-800 hover:bg-stone-700 text-stone-300 flex items-center justify-center"
+                      onClick={() => updateQuantity(cartIdx, 1)}
+                      className="w-6 h-6 rounded-md bg-stone-800 hover:bg-stone-700 text-stone-300 flex items-center justify-center cursor-pointer"
                     >
                       <Plus className="w-3 h-3" />
                     </button>
@@ -937,9 +1155,14 @@ export const POSView: React.FC<POSViewProps> = ({
 
                   <div className="text-right shrink-0 min-w-[50px]">
                     <p className="text-xs font-black text-amber-400 font-mono">{formatPrice(itemTotal)}</p>
+                    {lineCalc.freeUnits > 0 && (
+                      <p className="text-[9px] text-emerald-400 font-mono font-bold leading-none">
+                        Paga {lineCalc.paidUnits} de {item.cantidad}
+                      </p>
+                    )}
                     <button
-                      onClick={() => removeFromCart(item.plato.ID)}
-                      className="text-[10px] text-stone-500 hover:text-red-400"
+                      onClick={() => removeFromCart(cartIdx)}
+                      className="text-[10px] text-stone-500 hover:text-red-400 cursor-pointer mt-0.5"
                     >
                       Quitar
                     </button>

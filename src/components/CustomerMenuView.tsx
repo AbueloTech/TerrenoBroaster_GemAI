@@ -27,7 +27,7 @@ import { DEFAULT_PLATOS } from '../data/defaultData';
 import { imageService } from '../services/imageService';
 import { menuSyncService } from '../services/menuSyncService';
 import { formatCurrency } from '../utils/currency';
-import { calculatePromoPrice } from '../utils/promo';
+import { calculatePromoPrice, calculateLineItemTotal } from '../utils/promo';
 import { buildDigitalMenuWhatsAppUrl } from '../utils/whatsappParser';
 import { BrandLogo } from './BrandLogo';
 
@@ -142,7 +142,10 @@ export const CustomerMenuView: React.FC<CustomerMenuViewProps> = ({
   }, [cart]);
 
   const cartTotalPrice = useMemo(() => {
-    return cart.reduce((acc, i) => acc + i.cantidad * i.plato.Precio, 0);
+    return cart.reduce((acc, i) => {
+      const base = i.plato.PrecioOriginal || i.plato.Precio;
+      return acc + calculateLineItemTotal(base, i.cantidad, i.plato).total;
+    }, 0);
   }, [cart]);
 
   const handleAddToCart = (plato: Plato) => {
@@ -567,67 +570,81 @@ export const CustomerMenuView: React.FC<CustomerMenuViewProps> = ({
                   </div>
                 ) : (
                   <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
-                    {cart.map((item) => (
-                      <div
-                        key={item.plato.ID}
-                        className="bg-stone-950/80 border border-stone-800 p-3 rounded-xl flex items-center justify-between gap-3 text-xs"
-                      >
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center space-x-1.5 truncate">
-                            <h5 className="font-bold text-white truncate">{item.plato.Plato}</h5>
-                            {item.plato.PrecioOriginal && item.plato.PrecioOriginal > item.plato.Precio && (
-                              <span className="shrink-0 text-[9px] font-black px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30">
-                                🔥 PROMO
+                    {cart.map((item) => {
+                      const basePrice = item.plato.PrecioOriginal || item.plato.Precio;
+                      const lineCalc = calculateLineItemTotal(basePrice, item.cantidad, item.plato);
+                      return (
+                        <div
+                          key={item.plato.ID}
+                          className="bg-stone-950/80 border border-stone-800 p-3 rounded-xl flex items-center justify-between gap-3 text-xs"
+                        >
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center space-x-1.5 truncate">
+                              <h5 className="font-bold text-white truncate">{item.plato.Plato}</h5>
+                              {lineCalc.isPromoApplied && (
+                                <span className="shrink-0 text-[9px] font-black px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                                  🔥 {lineCalc.badgeLabel}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center space-x-1.5 font-mono text-[11px]">
+                              <span className={lineCalc.isPromoApplied ? 'text-emerald-400 font-bold' : 'text-stone-400'}>
+                                {formatCurrency(lineCalc.unitPrice)} c/u
+                              </span>
+                              {lineCalc.isPromoApplied && item.plato.PrecioOriginal && item.plato.PrecioOriginal > lineCalc.unitPrice && (
+                                <span className="text-stone-500 line-through text-[10px]">
+                                  {formatCurrency(item.plato.PrecioOriginal)}
+                                </span>
+                              )}
+                            </div>
+                            {lineCalc.freeUnits > 0 && (
+                              <span className="text-[10px] text-amber-400 font-bold block leading-tight">
+                                {lineCalc.promoNotice}
                               </span>
                             )}
                           </div>
-                          <div className="flex items-center space-x-1.5 font-mono text-[11px]">
-                            <span className={item.plato.PrecioOriginal && item.plato.PrecioOriginal > item.plato.Precio ? 'text-emerald-400 font-bold' : 'text-stone-400'}>
-                              {formatCurrency(item.plato.Precio)} c/u
+
+                          {/* Quantity Counter */}
+                          <div className="flex items-center space-x-1.5 bg-stone-900 border border-stone-700 rounded-lg px-1.5 py-0.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateQty(item.plato.ID, -1)}
+                              className="w-5 h-5 rounded text-stone-400 hover:text-white flex items-center justify-center font-bold cursor-pointer"
+                            >
+                              -
+                            </button>
+                            <span className="w-5 text-center font-mono font-bold text-amber-400">
+                              {item.cantidad}
                             </span>
-                            {item.plato.PrecioOriginal && item.plato.PrecioOriginal > item.plato.Precio && (
-                              <span className="text-stone-500 line-through text-[10px]">
-                                {formatCurrency(item.plato.PrecioOriginal)}
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateQty(item.plato.ID, 1)}
+                              className="w-5 h-5 rounded text-stone-400 hover:text-white flex items-center justify-center font-bold cursor-pointer"
+                            >
+                              +
+                            </button>
+                          </div>
+
+                          <div className="text-right shrink-0 min-w-[70px]">
+                            <span className="font-mono font-black text-stone-100 block">
+                              {formatCurrency(lineCalc.total)}
+                            </span>
+                            {lineCalc.freeUnits > 0 && (
+                              <span className="text-[9px] text-emerald-400 font-mono font-bold block">
+                                Paga {lineCalc.paidUnits} de {item.cantidad}
                               </span>
                             )}
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateQty(item.plato.ID, -item.cantidad)}
+                              className="text-stone-500 hover:text-rose-400 text-[10px] underline cursor-pointer"
+                            >
+                              Eliminar
+                            </button>
                           </div>
                         </div>
-
-                        {/* Quantity Counter */}
-                        <div className="flex items-center space-x-1.5 bg-stone-900 border border-stone-700 rounded-lg px-1.5 py-0.5 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => handleUpdateQty(item.plato.ID, -1)}
-                            className="w-5 h-5 rounded text-stone-400 hover:text-white flex items-center justify-center font-bold"
-                          >
-                            -
-                          </button>
-                          <span className="w-5 text-center font-mono font-bold text-amber-400">
-                            {item.cantidad}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => handleUpdateQty(item.plato.ID, 1)}
-                            className="w-5 h-5 rounded text-stone-400 hover:text-white flex items-center justify-center font-bold"
-                          >
-                            +
-                          </button>
-                        </div>
-
-                        <div className="text-right shrink-0 min-w-[70px]">
-                          <span className="font-mono font-black text-stone-100 block">
-                            {formatCurrency(item.plato.Precio * item.cantidad)}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => handleUpdateQty(item.plato.ID, -item.cantidad)}
-                            className="text-stone-500 hover:text-rose-400 text-[10px] underline"
-                          >
-                            Eliminar
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
 

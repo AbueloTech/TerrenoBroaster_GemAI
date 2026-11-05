@@ -104,8 +104,10 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
 
   // Controlled states for Insumo Promotion in modal
   const [modalPromoActiva, setModalPromoActiva] = useState(false);
-  const [modalPromoTipo, setModalPromoTipo] = useState<'Porcentaje' | 'PrecioFijo'>('Porcentaje');
+  const [modalPromoTipo, setModalPromoTipo] = useState<'Porcentaje' | 'PrecioFijo' | '2x1' | '3x1' | 'NxM'>('Porcentaje');
   const [modalPromoValor, setModalPromoValor] = useState<number>(15);
+  const [modalPromoNxMLleva, setModalPromoNxMLleva] = useState<number>(2);
+  const [modalPromoNxMPaga, setModalPromoNxMPaga] = useState<number>(1);
   const [modalPromoVigencia, setModalPromoVigencia] = useState<'Siempre' | 'Intervalo' | 'DiasSemana'>('Siempre');
   const [modalPromoFechaInicio, setModalPromoFechaInicio] = useState<string>('');
   const [modalPromoFechaFin, setModalPromoFechaFin] = useState<string>('');
@@ -135,13 +137,26 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
 
   // Controlled states for Selected Dish Promotion in Escandallos tab
   const [dishPromoActiva, setDishPromoActiva] = useState(false);
-  const [dishPromoTipo, setDishPromoTipo] = useState<'Porcentaje' | 'PrecioFijo'>('Porcentaje');
+  const [dishPromoTipo, setDishPromoTipo] = useState<'Porcentaje' | 'PrecioFijo' | '2x1' | '3x1' | 'NxM'>('Porcentaje');
   const [dishPromoValor, setDishPromoValor] = useState<number>(15);
+  const [dishPromoNxMLleva, setDishPromoNxMLleva] = useState<number>(2);
+  const [dishPromoNxMPaga, setDishPromoNxMPaga] = useState<number>(1);
   const [dishPromoVigencia, setDishPromoVigencia] = useState<'Siempre' | 'Intervalo' | 'DiasSemana'>('Siempre');
   const [dishPromoFechaInicio, setDishPromoFechaInicio] = useState<string>('');
   const [dishPromoFechaFin, setDishPromoFechaFin] = useState<string>('');
   const [dishPromoDiasSemana, setDishPromoDiasSemana] = useState<number[]>([1, 2, 3, 4, 5]);
   const [dishPromoEtiqueta, setDishPromoEtiqueta] = useState<string>('');
+  const [dishEsRacion, setDishEsRacion] = useState<boolean>(false);
+  const [dishTamanoRacion, setDishTamanoRacion] = useState<'Normal' | 'Mediana' | 'Grande'>('Normal');
+
+  // Custom in-app confirmation modal for deletions (replaces window.confirm which fails in iframe sandbox)
+  const [deleteModalState, setDeleteModalState] = useState<{
+    isOpen: boolean;
+    type: 'insumo' | 'receta' | 'proveedor';
+    id: number;
+    nombre: string;
+    extraInfo?: string;
+  } | null>(null);
 
   // UI Feedback
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -151,6 +166,29 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
+  };
+
+  const handleConfirmDelete = () => {
+    if (!deleteModalState) return;
+    const { type, id, nombre } = deleteModalState;
+
+    if (type === 'insumo') {
+      sqliteService.deleteInsumo(id);
+      showToast(`Insumo "${nombre}" eliminado del inventario.`);
+      loadData();
+    } else if (type === 'receta') {
+      sqliteService.deleteReceta(id);
+      setRecetaItems([]);
+      showToast(`Ficha técnica y receta de "${nombre}" eliminada con éxito.`);
+      loadData();
+      if (onRefreshPlatos) onRefreshPlatos();
+    } else if (type === 'proveedor') {
+      sqliteService.deleteProveedor(id);
+      showToast(`Proveedor "${nombre}" eliminado.`);
+      loadData();
+    }
+
+    setDeleteModalState(null);
   };
 
   // Open Insumo modal for creating new item
@@ -163,6 +201,8 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
     setModalPromoActiva(false);
     setModalPromoTipo('Porcentaje');
     setModalPromoValor(15);
+    setModalPromoNxMLleva(2);
+    setModalPromoNxMPaga(1);
     setModalPromoVigencia('Siempre');
     setModalPromoFechaInicio('');
     setModalPromoFechaFin('');
@@ -188,6 +228,8 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
     setModalPromoActiva(Boolean(ins.PromoActiva));
     setModalPromoTipo(ins.PromoTipo || 'Porcentaje');
     setModalPromoValor(ins.PromoValor != null ? ins.PromoValor : 15);
+    setModalPromoNxMLleva(ins.PromoNxMLleva || 2);
+    setModalPromoNxMPaga(ins.PromoNxMPaga || 1);
     setModalPromoVigencia(ins.PromoVigencia || 'Siempre');
     setModalPromoFechaInicio(ins.PromoFechaInicio || '');
     setModalPromoFechaFin(ins.PromoFechaFin || '');
@@ -338,12 +380,16 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
       setDishPromoActiva(Boolean(selectedPlato.PromoActiva));
       setDishPromoTipo(selectedPlato.PromoTipo || 'Porcentaje');
       setDishPromoValor(selectedPlato.PromoValor != null && selectedPlato.PromoValor > 0 ? selectedPlato.PromoValor : 15);
+      setDishPromoNxMLleva(selectedPlato.PromoNxMLleva || 2);
+      setDishPromoNxMPaga(selectedPlato.PromoNxMPaga || 1);
       setDishPromoVigencia(selectedPlato.PromoVigencia || 'Siempre');
       setDishPromoFechaInicio(selectedPlato.PromoFechaInicio || '');
       setDishPromoFechaFin(selectedPlato.PromoFechaFin || '');
       const parsedDays = parseDiasSemana(selectedPlato.PromoDiasSemana);
       setDishPromoDiasSemana(parsedDays.length > 0 ? parsedDays : [1, 2, 3, 4, 5]);
       setDishPromoEtiqueta(selectedPlato.PromoEtiqueta || '');
+      setDishEsRacion(Boolean(selectedPlato.EsRacion || selectedPlato.Categoria.toLowerCase().includes('racion')));
+      setDishTamanoRacion(selectedPlato.TamanoRacion || 'Normal');
     }
   }, [selectedPlatoId, selectedPlato]);
 
@@ -354,11 +400,15 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
       PromoActiva: dishPromoActiva,
       PromoTipo: dishPromoTipo,
       PromoValor: safeParsePrice(dishPromoValor),
+      PromoNxMLleva: dishPromoTipo === '2x1' ? 2 : dishPromoTipo === '3x1' ? 3 : dishPromoTipo === 'NxM' ? dishPromoNxMLleva : undefined,
+      PromoNxMPaga: dishPromoTipo === '2x1' ? 1 : dishPromoTipo === '3x1' ? 1 : dishPromoTipo === 'NxM' ? dishPromoNxMPaga : undefined,
       PromoVigencia: dishPromoVigencia,
       PromoFechaInicio: dishPromoFechaInicio || undefined,
       PromoFechaFin: dishPromoFechaFin || undefined,
       PromoDiasSemana: JSON.stringify(dishPromoDiasSemana),
       PromoEtiqueta: dishPromoEtiqueta.trim() || undefined,
+      EsRacion: dishEsRacion,
+      TamanoRacion: dishTamanoRacion,
     });
 
     if (ok) {
@@ -396,6 +446,8 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
       PromoActiva: modalPromoActiva,
       PromoTipo: modalPromoTipo,
       PromoValor: safeParsePrice(modalPromoValor),
+      PromoNxMLleva: modalPromoTipo === '2x1' ? 2 : modalPromoTipo === '3x1' ? 3 : modalPromoTipo === 'NxM' ? modalPromoNxMLleva : undefined,
+      PromoNxMPaga: modalPromoTipo === '2x1' ? 1 : modalPromoTipo === '3x1' ? 1 : modalPromoTipo === 'NxM' ? modalPromoNxMPaga : undefined,
       PromoVigencia: modalPromoVigencia,
       PromoFechaInicio: modalPromoFechaInicio || undefined,
       PromoFechaFin: modalPromoFechaFin || undefined,
@@ -537,7 +589,13 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
   };
 
   const handleRemoveIngrediente = (insumoId: number) => {
-    setRecetaItems(recetaItems.filter((i) => i.InsumoId !== insumoId));
+    const updated = recetaItems.filter((i) => i.InsumoId !== insumoId);
+    setRecetaItems(updated);
+    if (selectedPlatoId !== null) {
+      sqliteService.setRecetaForPlato(selectedPlatoId, updated);
+      loadData();
+      showToast('Ingrediente retirado de la ficha técnica.');
+    }
   };
 
   const handleSaveReceta = () => {
@@ -1455,11 +1513,13 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
                                 {/* Eliminar */}
                                 <button
                                   onClick={() => {
-                                    if (confirm(`¿Eliminar insumo "${item.Nombre}" del inventario?`)) {
-                                      sqliteService.deleteInsumo(item.InsumoId);
-                                      showToast(`Insumo "${item.Nombre}" eliminado.`);
-                                      loadData();
-                                    }
+                                    setDeleteModalState({
+                                      isOpen: true,
+                                      type: 'insumo',
+                                      id: item.InsumoId,
+                                      nombre: item.Nombre,
+                                      extraInfo: `Stock actual: ${item.StockActual} ${item.UnidadMedida}. Costo: $${item.CostoUnitario.toFixed(2)}.`,
+                                    });
                                   }}
                                   title="Eliminar Insumo"
                                   className="p-1.5 rounded-lg bg-stone-800 text-stone-400 hover:bg-red-500 hover:text-white transition-all cursor-pointer"
@@ -1534,23 +1594,45 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
                         </div>
                       </div>
 
-                      {hasRecipe ? (
-                        esc?.EsVentaDirecta ? (
-                          <span className="shrink-0 px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30 text-[10px] font-bold flex items-center gap-1">
-                            <Package className="w-3 h-3" />
-                            Venta Directa
-                          </span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {hasRecipe ? (
+                          esc?.EsVentaDirecta ? (
+                            <span className="shrink-0 px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30 text-[10px] font-bold flex items-center gap-1">
+                              <Package className="w-3 h-3" />
+                              Venta Directa
+                            </span>
+                          ) : (
+                            <span className="shrink-0 px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold flex items-center gap-1">
+                              <Check className="w-3 h-3" />
+                              Escandallo
+                            </span>
+                          )
                         ) : (
-                          <span className="shrink-0 px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold flex items-center gap-1">
-                            <Check className="w-3 h-3" />
-                            Escandallo
+                          <span className="shrink-0 px-2 py-0.5 rounded-full bg-stone-800 text-stone-500 text-[10px]">
+                            Sin receta
                           </span>
-                        )
-                      ) : (
-                        <span className="shrink-0 px-2 py-0.5 rounded-full bg-stone-800 text-stone-500 text-[10px]">
-                          Sin receta
-                        </span>
-                      )}
+                        )}
+
+                        {hasRecipe && !esc?.EsVentaDirecta && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeleteModalState({
+                                isOpen: true,
+                                type: 'receta',
+                                id: plato.ID,
+                                nombre: plato.Plato,
+                                extraInfo: 'Se eliminarán todos los ingredientes de la ficha técnica y este plato volverá a estado "Sin receta".',
+                              });
+                            }}
+                            title="Eliminar Ficha Técnica / Receta"
+                            className="p-1 rounded-md bg-stone-900 hover:bg-rose-600/30 text-stone-500 hover:text-rose-400 border border-stone-800 transition-colors cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </button>
                   );
                 })}
@@ -1579,7 +1661,27 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
                         <span className="text-xs text-stone-400">Categoría: {selectedPlato.Categoria}</span>
                       </div>
 
-                      <div className="flex items-center space-x-3">
+                      <div className="flex items-center space-x-2.5">
+                        {recetaItems.length > 0 && !selectedEscandallo?.EsVentaDirecta && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDeleteModalState({
+                                isOpen: true,
+                                type: 'receta',
+                                id: selectedPlato.ID,
+                                nombre: selectedPlato.Plato,
+                                extraInfo: `Se borrarán los ${recetaItems.length} ingredientes asignados a esta ficha técnica.`,
+                              });
+                            }}
+                            className="flex items-center space-x-1 px-2.5 py-2 rounded-xl bg-stone-800 hover:bg-rose-500/20 text-stone-400 hover:text-rose-400 border border-stone-700 text-xs font-bold transition-all cursor-pointer"
+                            title="Eliminar todos los ingredientes de la receta actual"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Eliminar Receta</span>
+                          </button>
+                        )}
+
                         <button
                           onClick={handlePrintFichaTecnica}
                           className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-md active:scale-95 cursor-pointer"
@@ -1588,7 +1690,7 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
                           <span>Imprimir Ficha Técnica</span>
                         </button>
 
-                        <div className="text-right">
+                        <div className="text-right pl-1">
                           <span className="text-[11px] text-stone-400 block">Precio Actual Menú POS</span>
                           <span className="text-2xl font-black text-white font-mono">
                             ${pricingAnalysis.precioActual.toFixed(2)}
@@ -1789,86 +1891,198 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
 
                     {dishPromoActiva && (
                       <div className="space-y-4 pt-1 animate-in fade-in duration-200">
-                        {/* Selector Tipo de Promoción (% vs Precio Fijo) */}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <button
-                            type="button"
-                            onClick={() => setDishPromoTipo('Porcentaje')}
-                            className={`p-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-2 cursor-pointer ${
-                              dishPromoTipo === 'Porcentaje'
-                                ? 'bg-rose-600 text-white shadow-md'
-                                : 'bg-stone-950 border border-stone-800 text-stone-400 hover:text-white'
-                            }`}
-                          >
-                            <Percent className="w-4 h-4" />
-                            <span>Porcentaje de Descuento (%)</span>
-                          </button>
+                        {/* Selector Tipo de Promoción (% vs Precio Fijo vs 2x1 vs 3x1 vs NxM) */}
+                        <div className="space-y-2">
+                          <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider">
+                            Modalidad de la Promoción:
+                          </label>
+                          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setDishPromoTipo('Porcentaje')}
+                              className={`p-2.5 rounded-xl text-xs font-bold transition-all flex flex-col items-center justify-center space-y-1 cursor-pointer ${
+                                dishPromoTipo === 'Porcentaje'
+                                  ? 'bg-rose-600 text-white shadow-md'
+                                  : 'bg-stone-950 border border-stone-800 text-stone-400 hover:text-white'
+                              }`}
+                            >
+                              <Percent className="w-4 h-4" />
+                              <span>Porcentaje (%)</span>
+                            </button>
 
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setDishPromoTipo('PrecioFijo');
-                              if (dishPromoValor < 100 && selectedPlato.Precio > 0) {
-                                setDishPromoValor(Math.round(selectedPlato.Precio * 0.8));
-                              }
-                            }}
-                            className={`p-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-2 cursor-pointer ${
-                              dishPromoTipo === 'PrecioFijo'
-                                ? 'bg-rose-600 text-white shadow-md'
-                                : 'bg-stone-950 border border-stone-800 text-stone-400 hover:text-white'
-                            }`}
-                          >
-                            <DollarSign className="w-4 h-4" />
-                            <span>Precio Fijo Rebajado ($)</span>
-                          </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDishPromoTipo('PrecioFijo');
+                                if (dishPromoValor < 100 && selectedPlato.Precio > 0) {
+                                  setDishPromoValor(Math.round(selectedPlato.Precio * 0.8));
+                                }
+                              }}
+                              className={`p-2.5 rounded-xl text-xs font-bold transition-all flex flex-col items-center justify-center space-y-1 cursor-pointer ${
+                                dishPromoTipo === 'PrecioFijo'
+                                  ? 'bg-rose-600 text-white shadow-md'
+                                  : 'bg-stone-950 border border-stone-800 text-stone-400 hover:text-white'
+                              }`}
+                            >
+                              <DollarSign className="w-4 h-4" />
+                              <span>Precio Fijo ($)</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDishPromoTipo('2x1');
+                                setDishPromoNxMLleva(2);
+                                setDishPromoNxMPaga(1);
+                              }}
+                              className={`p-2.5 rounded-xl text-xs font-bold transition-all flex flex-col items-center justify-center space-y-1 cursor-pointer ${
+                                dishPromoTipo === '2x1'
+                                  ? 'bg-rose-600 text-white shadow-md ring-2 ring-rose-400/50'
+                                  : 'bg-stone-950 border border-stone-800 text-stone-400 hover:text-white'
+                              }`}
+                            >
+                              <span className="text-base font-black">2x1</span>
+                              <span>Lleva 2, Paga 1</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDishPromoTipo('3x1');
+                                setDishPromoNxMLleva(3);
+                                setDishPromoNxMPaga(1);
+                              }}
+                              className={`p-2.5 rounded-xl text-xs font-bold transition-all flex flex-col items-center justify-center space-y-1 cursor-pointer ${
+                                dishPromoTipo === '3x1'
+                                  ? 'bg-rose-600 text-white shadow-md ring-2 ring-rose-400/50'
+                                  : 'bg-stone-950 border border-stone-800 text-stone-400 hover:text-white'
+                              }`}
+                            >
+                              <span className="text-base font-black">3x1</span>
+                              <span>Lleva 3, Paga 1</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDishPromoTipo('NxM');
+                                if (!dishPromoNxMLleva) setDishPromoNxMLleva(3);
+                                if (!dishPromoNxMPaga) setDishPromoNxMPaga(2);
+                              }}
+                              className={`p-2.5 rounded-xl text-xs font-bold transition-all flex flex-col items-center justify-center space-y-1 cursor-pointer col-span-2 sm:col-span-1 ${
+                                dishPromoTipo === 'NxM'
+                                  ? 'bg-rose-600 text-white shadow-md ring-2 ring-rose-400/50'
+                                  : 'bg-stone-950 border border-stone-800 text-stone-400 hover:text-white'
+                              }`}
+                            >
+                              <span className="text-base font-black">NxM</span>
+                              <span>Combo Variable</span>
+                            </button>
+                          </div>
                         </div>
 
-                        {/* Valor del Descuento & Botones de Rebaja Rápida */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
-                          <div>
-                            <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider mb-1">
-                              {dishPromoTipo === 'Porcentaje' ? 'Porcentaje a descontar (%):' : 'Nuevo Precio Rebajado ($):'}
-                            </label>
-                            <div className="relative">
-                              <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400 font-bold">
-                                {dishPromoTipo === 'Porcentaje' ? '%' : '$'}
+                        {/* Valor del Descuento / Configuración NxM */}
+                        {dishPromoTipo === 'Porcentaje' || dishPromoTipo === 'PrecioFijo' ? (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+                            <div>
+                              <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider mb-1">
+                                {dishPromoTipo === 'Porcentaje' ? 'Porcentaje a descontar (%):' : 'Nuevo Precio Rebajado ($):'}
+                              </label>
+                              <div className="relative">
+                                <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400 font-bold">
+                                  {dishPromoTipo === 'Porcentaje' ? '%' : '$'}
+                                </span>
+                                <input
+                                  type="number"
+                                  step="any"
+                                  min="1"
+                                  value={dishPromoValor || ''}
+                                  onChange={(e) => setDishPromoValor(safeParsePrice(e.target.value))}
+                                  className="w-full bg-stone-950 border border-stone-800 rounded-xl pl-8 pr-4 py-2.5 text-sm font-bold font-mono text-white focus:outline-none focus:border-rose-400"
+                                />
+                              </div>
+                            </div>
+
+                            <div>
+                              <span className="text-[10px] text-stone-400 uppercase font-bold block mb-1">
+                                Rebajas Rápidas con 1-Click:
                               </span>
-                              <input
-                                type="number"
-                                step="any"
-                                min="1"
-                                value={dishPromoValor || ''}
-                                onChange={(e) => setDishPromoValor(safeParsePrice(e.target.value))}
-                                className="w-full bg-stone-950 border border-stone-800 rounded-xl pl-8 pr-4 py-2.5 text-sm font-bold font-mono text-white focus:outline-none focus:border-rose-400"
-                              />
+                              <div className="flex flex-wrap gap-1.5">
+                                {[10, 15, 20, 25, 30, 50].map((pct) => (
+                                  <button
+                                    key={pct}
+                                    type="button"
+                                    onClick={() => {
+                                      if (dishPromoTipo === 'Porcentaje') {
+                                        setDishPromoValor(pct);
+                                      } else {
+                                        const base = selectedPlato.Precio > 0 ? selectedPlato.Precio : 10000;
+                                        setDishPromoValor(Math.round(base * (1 - pct / 100)));
+                                      }
+                                    }}
+                                    className="px-2.5 py-1.5 bg-stone-950 hover:bg-stone-800 border border-stone-800 rounded-lg text-xs font-bold text-stone-300 hover:text-white transition-all active:scale-95 cursor-pointer"
+                                  >
+                                    -{pct}%
+                                  </button>
+                                ))}
+                              </div>
                             </div>
                           </div>
-
-                          <div>
-                            <span className="text-[10px] text-stone-400 uppercase font-bold block mb-1">
-                              Rebajas Rápidas con 1-Click:
+                        ) : dishPromoTipo === 'NxM' ? (
+                          <div className="p-3.5 bg-stone-950 rounded-xl border border-rose-500/40 space-y-3">
+                            <div className="flex items-center gap-2 text-rose-300 font-bold text-xs uppercase tracking-wider">
+                              <Sparkles className="w-4 h-4" />
+                              <span>Configurar Combo NxM Personalizado (Lleva N, Paga M)</span>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                              <div>
+                                <label className="block text-xs font-bold text-stone-300 mb-1">
+                                  Lleva (Cantidad de Unidades entregadas):
+                                </label>
+                                <input
+                                  type="number"
+                                  min="2"
+                                  value={dishPromoNxMLleva}
+                                  onChange={(e) => setDishPromoNxMLleva(Math.max(2, parseInt(e.target.value) || 2))}
+                                  className="w-full bg-stone-900 border border-stone-800 rounded-xl px-3 py-2 text-sm font-bold font-mono text-white focus:outline-none focus:border-rose-400"
+                                />
+                                <span className="text-[10px] text-stone-500 mt-1 block">ej: 3 para un 3x2</span>
+                              </div>
+                              <div>
+                                <label className="block text-xs font-bold text-stone-300 mb-1">
+                                  Paga (Cantidad de Unidades que se cobran):
+                                </label>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  max={dishPromoNxMLleva - 1}
+                                  value={dishPromoNxMPaga}
+                                  onChange={(e) => setDishPromoNxMPaga(Math.max(1, parseInt(e.target.value) || 1))}
+                                  className="w-full bg-stone-900 border border-stone-800 rounded-xl px-3 py-2 text-sm font-bold font-mono text-white focus:outline-none focus:border-rose-400"
+                                />
+                                <span className="text-[10px] text-stone-500 mt-1 block">ej: 2 para pagar 2</span>
+                              </div>
+                            </div>
+                            <div className="p-2.5 bg-rose-500/10 rounded-lg border border-rose-500/20 text-xs text-rose-300 flex items-center justify-between">
+                              <span>🔥 En el POS y Menú: El cliente lleva {dishPromoNxMLleva} y solo paga {dishPromoNxMPaga}.</span>
+                              <span className="font-mono font-black text-amber-300">¡{dishPromoNxMLleva - dishPromoNxMPaga} Gratis!</span>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="p-3 bg-stone-950 rounded-xl border border-rose-500/40 text-xs text-rose-300 flex items-center justify-between">
+                            <div>
+                              <span className="font-black text-sm block">🔥 Promoción {dishPromoTipo} Activa</span>
+                              <span className="text-stone-400">
+                                {dishPromoTipo === '2x1'
+                                  ? 'Por cada 2 platos ordenados, 1 es completamente gratis (50% de ahorro global).'
+                                  : 'Por cada 3 platos ordenados, el cliente solo paga 1 y 2 son gratis.'}
+                              </span>
+                            </div>
+                            <span className="px-3 py-1.5 rounded-xl bg-rose-500 text-white font-black text-xs">
+                              {dishPromoTipo === '2x1' ? '¡1 Gratis x Par!' : '¡2 Gratis x Trío!'}
                             </span>
-                            <div className="flex flex-wrap gap-1.5">
-                              {[10, 15, 20, 25, 30, 50].map((pct) => (
-                                <button
-                                  key={pct}
-                                  type="button"
-                                  onClick={() => {
-                                    if (dishPromoTipo === 'Porcentaje') {
-                                      setDishPromoValor(pct);
-                                    } else {
-                                      const base = selectedPlato.Precio > 0 ? selectedPlato.Precio : 10000;
-                                      setDishPromoValor(Math.round(base * (1 - pct / 100)));
-                                    }
-                                  }}
-                                  className="px-2.5 py-1.5 bg-stone-950 hover:bg-stone-800 border border-stone-800 rounded-lg text-xs font-bold text-stone-300 hover:text-white transition-all active:scale-95 cursor-pointer"
-                                >
-                                  -{pct}%
-                                </button>
-                              ))}
-                            </div>
                           </div>
-                        </div>
+                        )}
 
                         {/* Vigencia / Días Programados */}
                         <div className="p-3.5 bg-stone-950 rounded-xl border border-stone-800 space-y-3">
@@ -2033,6 +2247,140 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
                             </div>
                           );
                         })()}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Card: Configuración de Ración & Escalador de Acompañamientos (Normal, Mediana, Grande) */}
+                  <div className="bg-stone-900 border border-amber-500/30 rounded-2xl p-5 shadow-lg space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-stone-800">
+                      <div className="flex items-center gap-2.5">
+                        <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400">
+                          <Layers className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h3 className="font-black text-white text-base">
+                              Opciones de Ración: Normal, Mediana o Grande
+                            </h3>
+                            {dishEsRacion && (
+                              <span className="px-2 py-0.5 rounded-full bg-amber-500 text-stone-950 text-[10px] font-black uppercase tracking-wider">
+                                Ración Activa
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-stone-400 mt-0.5">
+                            Permite ofrecer tamaños según la cantidad de pollo pedido (ej: 1-2 presas ➔ Normal, 3-4 presas ➔ Mediana, 8+ presas ➔ Grande).
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center space-x-3 self-end sm:self-auto">
+                        <label className="flex items-center gap-2 cursor-pointer bg-stone-950 px-3 py-1.5 rounded-xl border border-stone-800 hover:border-amber-500/50 transition-colors">
+                          <input
+                            type="checkbox"
+                            checked={dishEsRacion}
+                            onChange={(e) => setDishEsRacion(e.target.checked)}
+                            className="w-4 h-4 accent-amber-400 rounded cursor-pointer"
+                          />
+                          <span className="text-xs font-bold text-stone-200">
+                            {dishEsRacion ? 'Habilitar Raciones' : 'Deshabilitado'}
+                          </span>
+                        </label>
+
+                        <button
+                          type="button"
+                          onClick={handleSaveDishPromo}
+                          className="flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-black text-xs transition-all shadow-md active:scale-95 cursor-pointer"
+                        >
+                          <Save className="w-3.5 h-3.5" />
+                          <span>Guardar Ración</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {dishEsRacion && (
+                      <div className="space-y-4 pt-1 animate-in fade-in duration-200">
+                        {/* Selector de Tamaño Base por Defecto */}
+                        <div className="space-y-1.5">
+                          <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider">
+                            Tamaño Base por Defecto en Carta:
+                          </label>
+                          <div className="grid grid-cols-3 gap-2">
+                            {(['Normal', 'Mediana', 'Grande'] as const).map((tam) => (
+                              <button
+                                key={tam}
+                                type="button"
+                                onClick={() => setDishTamanoRacion(tam)}
+                                className={`py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                                  dishTamanoRacion === tam
+                                    ? 'bg-amber-500 text-stone-950 shadow-md font-black'
+                                    : 'bg-stone-950 border border-stone-800 text-stone-400 hover:text-white'
+                                }`}
+                              >
+                                {tam === 'Normal' && '🍟 Normal (1-2 presas)'}
+                                {tam === 'Mediana' && '🍟 Mediana (3-4 presas)'}
+                                {tam === 'Grande' && '🍟 Grande (8+ presas / Familiar)'}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Interactive Scale Table for Kitchen & Pricing */}
+                        <div className="overflow-x-auto rounded-xl border border-stone-800 bg-stone-950">
+                          <table className="w-full text-left text-xs">
+                            <thead className="bg-stone-900/90 text-stone-300 font-bold border-b border-stone-800">
+                              <tr>
+                                <th className="py-2.5 px-3">Tamaño Ración</th>
+                                <th className="py-2.5 px-3 text-center">Factor Escala</th>
+                                <th className="py-2.5 px-3 text-center">Acompaña Pollo</th>
+                                <th className="py-2.5 px-3 text-right">Food Cost Estimado</th>
+                                <th className="py-2.5 px-3 text-right">Precio Sugerido Venta</th>
+                                <th className="py-2.5 px-3 text-center">Acción</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-stone-800/60 font-mono">
+                              {[
+                                { tam: 'Normal' as const, factor: 1.0, pollo: '1 - 2 Presas (Individual)', badge: 'bg-stone-800 text-stone-300' },
+                                { tam: 'Mediana' as const, factor: 1.5, pollo: '3 - 4 Presas (Pareja)', badge: 'bg-amber-500/20 text-amber-300' },
+                                { tam: 'Grande' as const, factor: 2.2, pollo: '8+ Presas / Combo Familiar', badge: 'bg-emerald-500/20 text-emerald-300' },
+                              ].map((row) => {
+                                const scaledCost = pricingAnalysis.costo * row.factor;
+                                const basePrice = pricingAnalysis.precioActual > 0 ? pricingAnalysis.precioActual : pricingAnalysis.precioSugerido60;
+                                const scaledPrice = Math.round(basePrice * row.factor * 100) / 100;
+                                const isCurrentBase = dishTamanoRacion === row.tam;
+
+                                return (
+                                  <tr key={row.tam} className={isCurrentBase ? 'bg-amber-500/10' : 'hover:bg-stone-900/40'}>
+                                    <td className="py-2.5 px-3 font-bold font-sans text-stone-200 flex items-center gap-2">
+                                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${row.badge}`}>
+                                        {row.tam}
+                                      </span>
+                                      {isCurrentBase && <span className="text-[10px] text-amber-400 font-bold font-sans">★ Base actual</span>}
+                                    </td>
+                                    <td className="py-2.5 px-3 text-center text-stone-400">{row.factor.toFixed(1)}x</td>
+                                    <td className="py-2.5 px-3 text-center font-sans text-stone-300 text-[11px]">{row.pollo}</td>
+                                    <td className="py-2.5 px-3 text-right text-rose-400 font-bold">${scaledCost.toFixed(2)}</td>
+                                    <td className="py-2.5 px-3 text-right text-emerald-400 font-black text-sm">${scaledPrice.toFixed(2)}</td>
+                                    <td className="py-2.5 px-3 text-center">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          handleApplySuggestedPrice(scaledPrice);
+                                          setDishTamanoRacion(row.tam);
+                                        }}
+                                        className="px-2 py-1 bg-stone-800 hover:bg-amber-500 hover:text-stone-950 text-stone-300 rounded-lg text-[10px] font-bold font-sans transition-colors cursor-pointer"
+                                        title={`Establecer precio de ${row.tam} ($${scaledPrice.toFixed(2)}) como precio principal del plato`}
+                                      >
+                                        Fijar Precio Base
+                                      </button>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -2307,13 +2655,16 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
                           </button>
                           <button
                             onClick={() => {
-                              if (confirm(`¿Eliminar proveedor "${prov.Nombre}"?`)) {
-                                sqliteService.deleteProveedor(prov.ProveedorId);
-                                showToast(`Proveedor eliminado.`);
-                                loadData();
-                              }
+                              setDeleteModalState({
+                                isOpen: true,
+                                type: 'proveedor',
+                                id: prov.ProveedorId,
+                                nombre: prov.Nombre,
+                                extraInfo: prov.Contacto ? `Contacto: ${prov.Contacto}` : undefined,
+                              });
                             }}
-                            className="p-1.5 rounded-lg text-stone-400 hover:text-red-400 hover:bg-stone-800 transition-colors"
+                            className="p-1.5 rounded-lg text-stone-400 hover:text-red-400 hover:bg-stone-800 transition-colors cursor-pointer"
+                            title="Eliminar Proveedor"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -3009,85 +3360,178 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
 
                 {modalPromoActiva && (
                   <div className="space-y-3.5 animate-in fade-in duration-150">
-                    {/* Tipo de Descuento: Porcentaje vs Precio Fijo */}
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setModalPromoTipo('Porcentaje')}
-                        className={`py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-1.5 cursor-pointer ${
-                          modalPromoTipo === 'Porcentaje'
-                            ? 'bg-rose-600 text-white shadow-md'
-                            : 'bg-stone-900 border border-stone-800 text-stone-400 hover:text-white'
-                        }`}
-                      >
-                        <Percent className="w-3.5 h-3.5" />
-                        <span>Porcentaje (%)</span>
-                      </button>
+                    {/* Tipo de Descuento: Porcentaje vs Precio Fijo vs 2x1 vs 3x1 vs NxM */}
+                    <div className="space-y-1.5">
+                      <label className="block text-[11px] font-bold text-stone-300 uppercase tracking-wider">
+                        Modalidad de Promoción:
+                      </label>
+                      <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setModalPromoTipo('Porcentaje')}
+                          className={`py-2 px-2 rounded-xl text-xs font-bold transition-all flex flex-col items-center justify-center space-y-0.5 cursor-pointer ${
+                            modalPromoTipo === 'Porcentaje'
+                              ? 'bg-rose-600 text-white shadow-md'
+                              : 'bg-stone-900 border border-stone-800 text-stone-400 hover:text-white'
+                          }`}
+                        >
+                          <Percent className="w-3.5 h-3.5" />
+                          <span>Porcentaje</span>
+                        </button>
 
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setModalPromoTipo('PrecioFijo');
-                          if (modalPromoValor < 100 && modalPrecioVenta > 0) {
-                            setModalPromoValor(Math.round(modalPrecioVenta * 0.8));
-                          }
-                        }}
-                        className={`py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-1.5 cursor-pointer ${
-                          modalPromoTipo === 'PrecioFijo'
-                            ? 'bg-rose-600 text-white shadow-md'
-                            : 'bg-stone-900 border border-stone-800 text-stone-400 hover:text-white'
-                        }`}
-                      >
-                        <DollarSign className="w-3.5 h-3.5" />
-                        <span>Precio Fijo ($)</span>
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setModalPromoTipo('PrecioFijo');
+                            if (modalPromoValor < 100 && modalPrecioVenta > 0) {
+                              setModalPromoValor(Math.round(modalPrecioVenta * 0.8));
+                            }
+                          }}
+                          className={`py-2 px-2 rounded-xl text-xs font-bold transition-all flex flex-col items-center justify-center space-y-0.5 cursor-pointer ${
+                            modalPromoTipo === 'PrecioFijo'
+                              ? 'bg-rose-600 text-white shadow-md'
+                              : 'bg-stone-900 border border-stone-800 text-stone-400 hover:text-white'
+                          }`}
+                        >
+                          <DollarSign className="w-3.5 h-3.5" />
+                          <span>Precio Fijo</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setModalPromoTipo('2x1');
+                            setModalPromoNxMLleva(2);
+                            setModalPromoNxMPaga(1);
+                          }}
+                          className={`py-2 px-2 rounded-xl text-xs font-bold transition-all flex flex-col items-center justify-center space-y-0.5 cursor-pointer ${
+                            modalPromoTipo === '2x1'
+                              ? 'bg-rose-600 text-white shadow-md ring-1 ring-rose-400'
+                              : 'bg-stone-900 border border-stone-800 text-stone-400 hover:text-white'
+                          }`}
+                        >
+                          <span className="font-black text-sm">2x1</span>
+                          <span className="text-[10px]">1 Gratis</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setModalPromoTipo('3x1');
+                            setModalPromoNxMLleva(3);
+                            setModalPromoNxMPaga(1);
+                          }}
+                          className={`py-2 px-2 rounded-xl text-xs font-bold transition-all flex flex-col items-center justify-center space-y-0.5 cursor-pointer ${
+                            modalPromoTipo === '3x1'
+                              ? 'bg-rose-600 text-white shadow-md ring-1 ring-rose-400'
+                              : 'bg-stone-900 border border-stone-800 text-stone-400 hover:text-white'
+                          }`}
+                        >
+                          <span className="font-black text-sm">3x1</span>
+                          <span className="text-[10px]">2 Gratis</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setModalPromoTipo('NxM');
+                            if (!modalPromoNxMLleva) setModalPromoNxMLleva(3);
+                            if (!modalPromoNxMPaga) setModalPromoNxMPaga(2);
+                          }}
+                          className={`py-2 px-2 rounded-xl text-xs font-bold transition-all flex flex-col items-center justify-center space-y-0.5 cursor-pointer col-span-2 sm:col-span-1 ${
+                            modalPromoTipo === 'NxM'
+                              ? 'bg-rose-600 text-white shadow-md ring-1 ring-rose-400'
+                              : 'bg-stone-900 border border-stone-800 text-stone-400 hover:text-white'
+                          }`}
+                        >
+                          <span className="font-black text-sm">NxM</span>
+                          <span className="text-[10px]">Combo</span>
+                        </button>
+                      </div>
                     </div>
 
-                    {/* Valor del Descuento & Botones Rápidos */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
-                      <div>
-                        <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider mb-1">
-                          {modalPromoTipo === 'Porcentaje' ? 'Porcentaje de Rebaja (%):' : 'Nuevo Precio Rebajado ($):'}
-                        </label>
-                        <div className="relative">
-                          <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-500 font-bold">
-                            {modalPromoTipo === 'Porcentaje' ? '%' : '$'}
-                          </span>
-                          <input
-                            type="number"
-                            step="any"
-                            min="1"
-                            value={modalPromoValor || ''}
-                            onChange={(e) => setModalPromoValor(safeParsePrice(e.target.value))}
-                            className="w-full bg-stone-900 border border-stone-800 rounded-xl pl-8 pr-3 py-2 text-sm font-bold font-mono text-white focus:outline-none focus:border-rose-400"
-                          />
+                    {/* Valor del Descuento / Configuración NxM */}
+                    {modalPromoTipo === 'Porcentaje' || modalPromoTipo === 'PrecioFijo' ? (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
+                        <div>
+                          <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider mb-1">
+                            {modalPromoTipo === 'Porcentaje' ? 'Porcentaje de Rebaja (%):' : 'Nuevo Precio Rebajado ($):'}
+                          </label>
+                          <div className="relative">
+                            <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-500 font-bold">
+                              {modalPromoTipo === 'Porcentaje' ? '%' : '$'}
+                            </span>
+                            <input
+                              type="number"
+                              step="any"
+                              min="1"
+                              value={modalPromoValor || ''}
+                              onChange={(e) => setModalPromoValor(safeParsePrice(e.target.value))}
+                              className="w-full bg-stone-900 border border-stone-800 rounded-xl pl-8 pr-3 py-2 text-sm font-bold font-mono text-white focus:outline-none focus:border-rose-400"
+                            />
+                          </div>
                         </div>
-                      </div>
 
-                      {/* Presets */}
-                      <div>
-                        <span className="text-[10px] text-stone-400 uppercase font-bold block mb-1">Descuentos Rápidos:</span>
-                        <div className="flex flex-wrap gap-1.5">
-                          {[10, 15, 20, 25, 30, 50].map((pct) => (
-                            <button
-                              key={pct}
-                              type="button"
-                              onClick={() => {
-                                if (modalPromoTipo === 'Porcentaje') {
-                                  setModalPromoValor(pct);
-                                } else {
-                                  const base = modalPrecioVenta > 0 ? modalPrecioVenta : 10000;
-                                  setModalPromoValor(Math.round(base * (1 - pct / 100)));
-                                }
-                              }}
-                              className="px-2 py-1 bg-stone-900 hover:bg-stone-800 border border-stone-800 rounded-lg text-xs font-bold text-stone-300 hover:text-white cursor-pointer active:scale-95"
-                            >
-                              -{pct}%
-                            </button>
-                          ))}
+                        {/* Presets */}
+                        <div>
+                          <span className="text-[10px] text-stone-400 uppercase font-bold block mb-1">Descuentos Rápidos:</span>
+                          <div className="flex flex-wrap gap-1.5">
+                            {[10, 15, 20, 25, 30, 50].map((pct) => (
+                              <button
+                                key={pct}
+                                type="button"
+                                onClick={() => {
+                                  if (modalPromoTipo === 'Porcentaje') {
+                                    setModalPromoValor(pct);
+                                  } else {
+                                    const base = modalPrecioVenta > 0 ? modalPrecioVenta : 10000;
+                                    setModalPromoValor(Math.round(base * (1 - pct / 100)));
+                                  }
+                                }}
+                                className="px-2 py-1 bg-stone-900 hover:bg-stone-800 border border-stone-800 rounded-lg text-xs font-bold text-stone-300 hover:text-white cursor-pointer active:scale-95"
+                              >
+                                -{pct}%
+                              </button>
+                            ))}
+                          </div>
                         </div>
                       </div>
-                    </div>
+                    ) : modalPromoTipo === 'NxM' ? (
+                      <div className="p-3 bg-stone-900 rounded-xl border border-rose-500/40 space-y-2.5">
+                        <span className="text-xs font-bold text-rose-300 block">Combo Variable NxM (Lleva N, Paga M):</span>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-[10px] text-stone-400 font-bold block mb-1">Lleva (Recibe):</label>
+                            <input
+                              type="number"
+                              min="2"
+                              value={modalPromoNxMLleva}
+                              onChange={(e) => setModalPromoNxMLleva(Math.max(2, parseInt(e.target.value) || 2))}
+                              className="w-full bg-stone-950 border border-stone-800 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono font-bold"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-stone-400 font-bold block mb-1">Paga (Cobra):</label>
+                            <input
+                              type="number"
+                              min="1"
+                              max={modalPromoNxMLleva - 1}
+                              value={modalPromoNxMPaga}
+                              onChange={(e) => setModalPromoNxMPaga(Math.max(1, parseInt(e.target.value) || 1))}
+                              className="w-full bg-stone-950 border border-stone-800 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono font-bold"
+                            />
+                          </div>
+                        </div>
+                        <div className="text-[11px] text-amber-300 font-bold">
+                          🔥 Promo: Lleva {modalPromoNxMLleva} y paga solo {modalPromoNxMPaga} (¡{modalPromoNxMLleva - modalPromoNxMPaga} gratis!).
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-2.5 bg-stone-900 rounded-xl border border-rose-500/40 text-xs text-rose-300 flex items-center justify-between">
+                        <span>🔥 Promo {modalPromoTipo}: {modalPromoTipo === '2x1' ? 'Lleva 2 y paga 1 (1 gratis)' : 'Lleva 3 y paga 1 (2 gratis)'}</span>
+                        <span className="px-2 py-0.5 rounded bg-rose-500 text-white font-black text-[10px]">Activo</span>
+                      </div>
+                    )}
 
                     {/* Programación / Vigencia */}
                     <div className="space-y-2">
@@ -3578,6 +4022,60 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
           notes={printReportData.notes}
           downloadFilename={printReportData.downloadFilename}
         />
+      )}
+      {/* CUSTOM IN-APP CONFIRMATION MODAL FOR DELETION (REPLACES WINDOW.CONFIRM) */}
+      {deleteModalState && (
+        <div className="fixed inset-0 bg-stone-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-150">
+          <div className="bg-stone-900 border border-stone-800 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center space-x-3">
+              <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center shrink-0">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-white">¿Confirmar Eliminación?</h3>
+                <p className="text-xs text-stone-400">
+                  {deleteModalState.type === 'insumo' && 'Eliminarás este insumo de la base de datos de inventario.'}
+                  {deleteModalState.type === 'receta' && 'Eliminarás la receta y ficha técnica de este plato.'}
+                  {deleteModalState.type === 'proveedor' && 'Eliminarás este proveedor del directorio.'}
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3.5 bg-stone-950 rounded-2xl border border-stone-800/80 space-y-1">
+              <span className="text-[11px] uppercase tracking-wider text-stone-400 font-bold block">
+                Elemento seleccionado:
+              </span>
+              <p className="text-sm font-black text-white">{deleteModalState.nombre}</p>
+              {deleteModalState.extraInfo && (
+                <p className="text-xs text-stone-400 font-mono mt-1 pt-1 border-t border-stone-800">
+                  {deleteModalState.extraInfo}
+                </p>
+              )}
+            </div>
+
+            <p className="text-xs text-rose-400/90 font-medium leading-relaxed">
+              ⚠️ Esta acción no se puede deshacer. Los registros afectados se actualizarán inmediatamente.
+            </p>
+
+            <div className="flex items-center justify-end space-x-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeleteModalState(null)}
+                className="px-4 py-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 font-bold text-xs transition-colors cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs sm:text-sm transition-all shadow-lg shadow-rose-900/30 flex items-center space-x-1.5 cursor-pointer active:scale-95"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Sí, Eliminar</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

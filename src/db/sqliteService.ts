@@ -26,6 +26,8 @@ import {
   MovimientoInventario,
   TipoMovimientoInventario,
   CierreCaja,
+  TipoPromocion,
+  TamanoRacion,
 } from '../types';
 import { DEFAULT_PLATOS, generateSeedSales, generateSeedComandas } from '../data/defaultData';
 import { safeParsePrice } from '../utils/currency';
@@ -350,7 +352,11 @@ class SQLiteService {
         PromoFechaInicio TEXT,
         PromoFechaFin TEXT,
         PromoDiasSemana TEXT,
-        PromoEtiqueta TEXT
+        PromoEtiqueta TEXT,
+        PromoNxMLleva INTEGER DEFAULT 2,
+        PromoNxMPaga INTEGER DEFAULT 1,
+        EsRacion INTEGER DEFAULT 0,
+        TamanoRacion TEXT DEFAULT 'Normal'
       );
     `);
 
@@ -448,7 +454,11 @@ class SQLiteService {
         PromoFechaInicio TEXT,
         PromoFechaFin TEXT,
         PromoDiasSemana TEXT,
-        PromoEtiqueta TEXT
+        PromoEtiqueta TEXT,
+        PromoNxMLleva INTEGER DEFAULT 2,
+        PromoNxMPaga INTEGER DEFAULT 1,
+        EsRacion INTEGER DEFAULT 0,
+        TamanoRacionDefecto TEXT DEFAULT 'Normal'
       );
     `);
 
@@ -602,6 +612,10 @@ class SQLiteService {
           { name: 'promofechafin', sql: "ALTER TABLE Platos ADD COLUMN PromoFechaFin TEXT;" },
           { name: 'promodiassemana', sql: "ALTER TABLE Platos ADD COLUMN PromoDiasSemana TEXT;" },
           { name: 'promoetiqueta', sql: "ALTER TABLE Platos ADD COLUMN PromoEtiqueta TEXT;" },
+          { name: 'promonxmlleva', sql: "ALTER TABLE Platos ADD COLUMN PromoNxMLleva INTEGER DEFAULT 2;" },
+          { name: 'promonxmpaga', sql: "ALTER TABLE Platos ADD COLUMN PromoNxMPaga INTEGER DEFAULT 1;" },
+          { name: 'esracion', sql: "ALTER TABLE Platos ADD COLUMN EsRacion INTEGER DEFAULT 0;" },
+          { name: 'tamanoracion', sql: "ALTER TABLE Platos ADD COLUMN TamanoRacion TEXT DEFAULT 'Normal';" },
         ];
         for (const col of promoCols) {
           if (!colNames.includes(col.name)) {
@@ -627,6 +641,10 @@ class SQLiteService {
           { name: 'promofechafin', sql: "ALTER TABLE Insumos ADD COLUMN PromoFechaFin TEXT;" },
           { name: 'promodiassemana', sql: "ALTER TABLE Insumos ADD COLUMN PromoDiasSemana TEXT;" },
           { name: 'promoetiqueta', sql: "ALTER TABLE Insumos ADD COLUMN PromoEtiqueta TEXT;" },
+          { name: 'promonxmlleva', sql: "ALTER TABLE Insumos ADD COLUMN PromoNxMLleva INTEGER DEFAULT 2;" },
+          { name: 'promonxmpaga', sql: "ALTER TABLE Insumos ADD COLUMN PromoNxMPaga INTEGER DEFAULT 1;" },
+          { name: 'esracion', sql: "ALTER TABLE Insumos ADD COLUMN EsRacion INTEGER DEFAULT 0;" },
+          { name: 'tamanoraciondefecto', sql: "ALTER TABLE Insumos ADD COLUMN TamanoRacionDefecto TEXT DEFAULT 'Normal';" },
         ];
         for (const col of promoCols) {
           if (!colNames.includes(col.name)) {
@@ -823,6 +841,10 @@ class SQLiteService {
           PromoFechaFin: item.PromoFechaFin ? String(item.PromoFechaFin) : undefined,
           PromoDiasSemana: item.PromoDiasSemana ? String(item.PromoDiasSemana) : undefined,
           PromoEtiqueta: item.PromoEtiqueta ? String(item.PromoEtiqueta) : undefined,
+          PromoNxMLleva: item.PromoNxMLleva != null ? Number(item.PromoNxMLleva) : 2,
+          PromoNxMPaga: item.PromoNxMPaga != null ? Number(item.PromoNxMPaga) : 1,
+          EsRacion: Boolean(item.EsRacion),
+          TamanoRacion: item.TamanoRacion ? (item.TamanoRacion as any) : 'Normal',
         };
       });
     } catch (e) {
@@ -837,16 +859,20 @@ class SQLiteService {
     const promoActiva = plato.PromoActiva ? 1 : 0;
     const promoTipo = plato.PromoTipo || 'Porcentaje';
     const promoValor = Number(plato.PromoValor) || 0;
+    const promoNxMLleva = plato.PromoNxMLleva != null ? Number(plato.PromoNxMLleva) : 2;
+    const promoNxMPaga = plato.PromoNxMPaga != null ? Number(plato.PromoNxMPaga) : 1;
     const promoVigencia = plato.PromoVigencia || 'Siempre';
     const promoInicio = plato.PromoFechaInicio || null;
     const promoFin = plato.PromoFechaFin || null;
     const promoDias = plato.PromoDiasSemana || null;
     const promoEtiqueta = plato.PromoEtiqueta || null;
+    const esRacion = plato.EsRacion ? 1 : (plato.Categoria?.toLowerCase().includes('racion') ? 1 : 0);
+    const tamanoRacion = plato.TamanoRacion || 'Normal';
 
     let created: Plato;
     if (this.db) {
       const stmt = this.db.prepare(
-        'INSERT INTO Platos (Plato, Precio, Categoria, Imagen, Descripcion, PromoActiva, PromoTipo, PromoValor, PromoVigencia, PromoFechaInicio, PromoFechaFin, PromoDiasSemana, PromoEtiqueta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO Platos (Plato, Precio, Categoria, Imagen, Descripcion, PromoActiva, PromoTipo, PromoValor, PromoVigencia, PromoFechaInicio, PromoFechaFin, PromoDiasSemana, PromoEtiqueta, PromoNxMLleva, PromoNxMPaga, EsRacion, TamanoRacion) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
       );
       stmt.run([
         plato.Plato,
@@ -862,6 +888,10 @@ class SQLiteService {
         promoFin,
         promoDias,
         promoEtiqueta,
+        promoNxMLleva,
+        promoNxMPaga,
+        esRacion,
+        tamanoRacion,
       ]);
       stmt.free();
 
@@ -878,11 +908,15 @@ class SQLiteService {
         PromoActiva: Boolean(promoActiva),
         PromoTipo: promoTipo as any,
         PromoValor: promoValor,
+        PromoNxMLleva: promoNxMLleva,
+        PromoNxMPaga: promoNxMPaga,
         PromoVigencia: promoVigencia as any,
         PromoFechaInicio: promoInicio || undefined,
         PromoFechaFin: promoFin || undefined,
         PromoDiasSemana: promoDias || undefined,
         PromoEtiqueta: promoEtiqueta || undefined,
+        EsRacion: Boolean(esRacion),
+        TamanoRacion: tamanoRacion as any,
       };
       this.fallbackPlatos.push(created);
     } else {
@@ -897,11 +931,15 @@ class SQLiteService {
         PromoActiva: Boolean(promoActiva),
         PromoTipo: promoTipo as any,
         PromoValor: promoValor,
+        PromoNxMLleva: promoNxMLleva,
+        PromoNxMPaga: promoNxMPaga,
         PromoVigencia: promoVigencia as any,
         PromoFechaInicio: promoInicio || undefined,
         PromoFechaFin: promoFin || undefined,
         PromoDiasSemana: promoDias || undefined,
         PromoEtiqueta: promoEtiqueta || undefined,
+        EsRacion: Boolean(esRacion),
+        TamanoRacion: tamanoRacion as any,
       };
       this.fallbackPlatos.push(created);
     }
@@ -916,15 +954,19 @@ class SQLiteService {
     const promoActiva = plato.PromoActiva ? 1 : 0;
     const promoTipo = plato.PromoTipo || 'Porcentaje';
     const promoValor = Number(plato.PromoValor) || 0;
+    const promoNxMLleva = plato.PromoNxMLleva != null ? Number(plato.PromoNxMLleva) : 2;
+    const promoNxMPaga = plato.PromoNxMPaga != null ? Number(plato.PromoNxMPaga) : 1;
     const promoVigencia = plato.PromoVigencia || 'Siempre';
     const promoInicio = plato.PromoFechaInicio || null;
     const promoFin = plato.PromoFechaFin || null;
     const promoDias = plato.PromoDiasSemana || null;
     const promoEtiqueta = plato.PromoEtiqueta || null;
+    const esRacion = plato.EsRacion ? 1 : (plato.Categoria?.toLowerCase().includes('racion') ? 1 : 0);
+    const tamanoRacion = plato.TamanoRacion || 'Normal';
 
     if (this.db) {
       const stmt = this.db.prepare(
-        'UPDATE Platos SET Plato = ?, Precio = ?, Categoria = ?, Imagen = ?, Descripcion = ?, PromoActiva = ?, PromoTipo = ?, PromoValor = ?, PromoVigencia = ?, PromoFechaInicio = ?, PromoFechaFin = ?, PromoDiasSemana = ?, PromoEtiqueta = ? WHERE ID = ?'
+        'UPDATE Platos SET Plato = ?, Precio = ?, Categoria = ?, Imagen = ?, Descripcion = ?, PromoActiva = ?, PromoTipo = ?, PromoValor = ?, PromoVigencia = ?, PromoFechaInicio = ?, PromoFechaFin = ?, PromoDiasSemana = ?, PromoEtiqueta = ?, PromoNxMLleva = ?, PromoNxMPaga = ?, EsRacion = ?, TamanoRacion = ? WHERE ID = ?'
       );
       stmt.run([
         plato.Plato,
@@ -940,6 +982,10 @@ class SQLiteService {
         promoFin,
         promoDias,
         promoEtiqueta,
+        promoNxMLleva,
+        promoNxMPaga,
+        esRacion,
+        tamanoRacion,
         plato.ID,
       ]);
       stmt.free();
@@ -954,11 +1000,15 @@ class SQLiteService {
         PromoActiva: Boolean(promoActiva),
         PromoTipo: promoTipo as any,
         PromoValor: promoValor,
+        PromoNxMLleva: promoNxMLleva,
+        PromoNxMPaga: promoNxMPaga,
         PromoVigencia: promoVigencia as any,
         PromoFechaInicio: promoInicio || undefined,
         PromoFechaFin: promoFin || undefined,
         PromoDiasSemana: promoDias || undefined,
         PromoEtiqueta: promoEtiqueta || undefined,
+        EsRacion: Boolean(esRacion),
+        TamanoRacion: tamanoRacion as any,
       };
     }
     this.notify();
@@ -970,13 +1020,17 @@ class SQLiteService {
     platoId: number,
     promoData: {
       PromoActiva: boolean;
-      PromoTipo?: 'Porcentaje' | 'PrecioFijo';
+      PromoTipo?: TipoPromocion;
       PromoValor?: number;
+      PromoNxMLleva?: number;
+      PromoNxMPaga?: number;
       PromoVigencia?: 'Siempre' | 'Intervalo' | 'DiasSemana';
       PromoFechaInicio?: string;
       PromoFechaFin?: string;
       PromoDiasSemana?: string;
       PromoEtiqueta?: string;
+      EsRacion?: boolean;
+      TamanoRacion?: TamanoRacion;
     }
   ): boolean {
     const plato = this.getPlatos().find((p) => p.ID === platoId);
@@ -986,11 +1040,15 @@ class SQLiteService {
       PromoActiva: promoData.PromoActiva,
       PromoTipo: promoData.PromoTipo || 'Porcentaje',
       PromoValor: promoData.PromoValor || 0,
+      PromoNxMLleva: promoData.PromoNxMLleva != null ? promoData.PromoNxMLleva : 2,
+      PromoNxMPaga: promoData.PromoNxMPaga != null ? promoData.PromoNxMPaga : 1,
       PromoVigencia: promoData.PromoVigencia || 'Siempre',
       PromoFechaInicio: promoData.PromoFechaInicio,
       PromoFechaFin: promoData.PromoFechaFin,
       PromoDiasSemana: promoData.PromoDiasSemana,
       PromoEtiqueta: promoData.PromoEtiqueta,
+      EsRacion: promoData.EsRacion != null ? promoData.EsRacion : plato.EsRacion,
+      TamanoRacion: promoData.TamanoRacion != null ? promoData.TamanoRacion : plato.TamanoRacion,
     });
   }
 
@@ -2906,6 +2964,10 @@ class SQLiteService {
           PromoFechaFin: item.PromoFechaFin ? String(item.PromoFechaFin) : undefined,
           PromoDiasSemana: item.PromoDiasSemana ? String(item.PromoDiasSemana) : undefined,
           PromoEtiqueta: item.PromoEtiqueta ? String(item.PromoEtiqueta) : undefined,
+          PromoNxMLleva: item.PromoNxMLleva != null ? Number(item.PromoNxMLleva) : 2,
+          PromoNxMPaga: item.PromoNxMPaga != null ? Number(item.PromoNxMPaga) : 1,
+          EsRacion: Boolean(item.EsRacion),
+          TamanoRacionDefecto: item.TamanoRacionDefecto ? (item.TamanoRacionDefecto as any) : 'Normal',
         };
       });
     } catch (e) {
@@ -2923,15 +2985,19 @@ class SQLiteService {
     const promoActiva = data.PromoActiva ? 1 : 0;
     const promoTipo = data.PromoTipo || 'Porcentaje';
     const promoValor = Number(data.PromoValor) || 0;
+    const promoNxMLleva = data.PromoNxMLleva != null ? Number(data.PromoNxMLleva) : 2;
+    const promoNxMPaga = data.PromoNxMPaga != null ? Number(data.PromoNxMPaga) : 1;
     const promoVigencia = data.PromoVigencia || 'Siempre';
     const promoInicio = data.PromoFechaInicio || null;
     const promoFin = data.PromoFechaFin || null;
     const promoDias = data.PromoDiasSemana || null;
     const promoEtiqueta = data.PromoEtiqueta || null;
+    const esRacion = data.EsRacion ? 1 : (data.Categoria?.toLowerCase().includes('racion') ? 1 : 0);
+    const tamanoRacionDefecto = data.TamanoRacionDefecto || 'Normal';
 
     if (this.db) {
       const stmt = this.db.prepare(
-        'INSERT INTO Insumos (Nombre, Categoria, UnidadMedida, StockActual, StockMinimo, CostoUnitario, PrecioVenta, ProveedorId, EsVentaDirecta, PlatoId, UltimaActualizacion, PromoActiva, PromoTipo, PromoValor, PromoVigencia, PromoFechaInicio, PromoFechaFin, PromoDiasSemana, PromoEtiqueta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO Insumos (Nombre, Categoria, UnidadMedida, StockActual, StockMinimo, CostoUnitario, PrecioVenta, ProveedorId, EsVentaDirecta, PlatoId, UltimaActualizacion, PromoActiva, PromoTipo, PromoValor, PromoVigencia, PromoFechaInicio, PromoFechaFin, PromoDiasSemana, PromoEtiqueta, PromoNxMLleva, PromoNxMPaga, EsRacion, TamanoRacionDefecto) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
       );
       stmt.run([
         data.Nombre.trim(),
@@ -2953,6 +3019,10 @@ class SQLiteService {
         promoFin,
         promoDias,
         promoEtiqueta,
+        promoNxMLleva,
+        promoNxMPaga,
+        esRacion,
+        tamanoRacionDefecto,
       ]);
       stmt.free();
 
@@ -2990,11 +3060,15 @@ class SQLiteService {
         PromoActiva: Boolean(promoActiva),
         PromoTipo: promoTipo as any,
         PromoValor: promoValor,
+        PromoNxMLleva: promoNxMLleva,
+        PromoNxMPaga: promoNxMPaga,
         PromoVigencia: promoVigencia as any,
         PromoFechaInicio: promoInicio || undefined,
         PromoFechaFin: promoFin || undefined,
         PromoDiasSemana: promoDias || undefined,
         PromoEtiqueta: promoEtiqueta || undefined,
+        EsRacion: Boolean(esRacion),
+        TamanoRacionDefecto: tamanoRacionDefecto as any,
       };
 
       this.fallbackInsumos.push(created);
@@ -3019,11 +3093,15 @@ class SQLiteService {
         PromoActiva: Boolean(promoActiva),
         PromoTipo: promoTipo as any,
         PromoValor: promoValor,
+        PromoNxMLleva: promoNxMLleva,
+        PromoNxMPaga: promoNxMPaga,
         PromoVigencia: promoVigencia as any,
         PromoFechaInicio: promoInicio || undefined,
         PromoFechaFin: promoFin || undefined,
         PromoDiasSemana: promoDias || undefined,
         PromoEtiqueta: promoEtiqueta || undefined,
+        EsRacion: Boolean(esRacion),
+        TamanoRacionDefecto: tamanoRacionDefecto as any,
       };
       this.fallbackInsumos.push(created);
       this.notify();
@@ -3041,15 +3119,19 @@ class SQLiteService {
     const promoActiva = insumo.PromoActiva ? 1 : 0;
     const promoTipo = insumo.PromoTipo || 'Porcentaje';
     const promoValor = Number(insumo.PromoValor) || 0;
+    const promoNxMLleva = insumo.PromoNxMLleva != null ? Number(insumo.PromoNxMLleva) : 2;
+    const promoNxMPaga = insumo.PromoNxMPaga != null ? Number(insumo.PromoNxMPaga) : 1;
     const promoVigencia = insumo.PromoVigencia || 'Siempre';
     const promoInicio = insumo.PromoFechaInicio || null;
     const promoFin = insumo.PromoFechaFin || null;
     const promoDias = insumo.PromoDiasSemana || null;
     const promoEtiqueta = insumo.PromoEtiqueta || null;
+    const esRacion = insumo.EsRacion ? 1 : (insumo.Categoria?.toLowerCase().includes('racion') ? 1 : 0);
+    const tamanoRacionDefecto = insumo.TamanoRacionDefecto || 'Normal';
 
     if (this.db) {
       const stmt = this.db.prepare(
-        'UPDATE Insumos SET Nombre = ?, Categoria = ?, UnidadMedida = ?, StockActual = ?, StockMinimo = ?, CostoUnitario = ?, PrecioVenta = ?, ProveedorId = ?, EsVentaDirecta = ?, PlatoId = ?, UltimaActualizacion = ?, PromoActiva = ?, PromoTipo = ?, PromoValor = ?, PromoVigencia = ?, PromoFechaInicio = ?, PromoFechaFin = ?, PromoDiasSemana = ?, PromoEtiqueta = ? WHERE InsumoId = ?'
+        'UPDATE Insumos SET Nombre = ?, Categoria = ?, UnidadMedida = ?, StockActual = ?, StockMinimo = ?, CostoUnitario = ?, PrecioVenta = ?, ProveedorId = ?, EsVentaDirecta = ?, PlatoId = ?, UltimaActualizacion = ?, PromoActiva = ?, PromoTipo = ?, PromoValor = ?, PromoVigencia = ?, PromoFechaInicio = ?, PromoFechaFin = ?, PromoDiasSemana = ?, PromoEtiqueta = ?, PromoNxMLleva = ?, PromoNxMPaga = ?, EsRacion = ?, TamanoRacionDefecto = ? WHERE InsumoId = ?'
       );
       stmt.run([
         insumo.Nombre.trim(),
@@ -3071,6 +3153,10 @@ class SQLiteService {
         promoFin,
         promoDias,
         promoEtiqueta,
+        promoNxMLleva,
+        promoNxMPaga,
+        esRacion,
+        tamanoRacionDefecto,
         insumo.InsumoId,
       ]);
       stmt.free();
@@ -3088,11 +3174,15 @@ class SQLiteService {
         PromoActiva: Boolean(promoActiva),
         PromoTipo: promoTipo as any,
         PromoValor: promoValor,
+        PromoNxMLleva: promoNxMLleva,
+        PromoNxMPaga: promoNxMPaga,
         PromoVigencia: promoVigencia as any,
         PromoFechaInicio: promoInicio || undefined,
         PromoFechaFin: promoFin || undefined,
         PromoDiasSemana: promoDias || undefined,
         PromoEtiqueta: promoEtiqueta || undefined,
+        EsRacion: Boolean(esRacion),
+        TamanoRacionDefecto: tamanoRacionDefecto as any,
       };
     }
 
@@ -3378,6 +3468,16 @@ class SQLiteService {
     return true;
   }
 
+  public deleteReceta(platoId: number): boolean {
+    if (this.db) {
+      this.db.run(`DELETE FROM Recetas WHERE PlatoId = ${platoId}`);
+    }
+    this.fallbackRecetas = this.fallbackRecetas.filter((r) => r.PlatoId !== platoId);
+    this.notify();
+    this.uploadDatabaseToServer();
+    return true;
+  }
+
   /**
    * Generates a complete Escandallo (cost & profit structure) for every dish in the restaurant.
    * Seamlessly integrates both kitchen recipes and direct-sale items without requiring artificial 1-ingredient recipes.
@@ -3428,10 +3528,6 @@ class SQLiteService {
       const margenSobreCosto = costoTotalInsumos > 0 ? ((precioVenta - costoTotalInsumos) / costoTotalInsumos) * 100 : 0;
 
       // Standard gastronomy pricing rules:
-      // Price = Food Cost / (1 - Target Margin)
-      // For 60% Margin (40% Food Cost): Cost / 0.40
-      // For 50% Margin (50% Food Cost): Cost / 0.50
-      // For 70% Margin (30% Food Cost): Cost / 0.30
       const precioSugeridoMargen60 = costoTotalInsumos > 0 ? Math.round(costoTotalInsumos / 0.40) : precioVenta;
       const precioSugeridoMargen50 = costoTotalInsumos > 0 ? Math.round(costoTotalInsumos / 0.50) : precioVenta;
       const precioSugeridoMargen70 = costoTotalInsumos > 0 ? Math.round(costoTotalInsumos / 0.30) : precioVenta;
@@ -3466,6 +3562,8 @@ class SQLiteService {
         PromoActiva: promoSource.PromoActiva,
         PromoTipo: promoSource.PromoTipo,
         PromoValor: promoSource.PromoValor,
+        PromoNxMLleva: promoSource.PromoNxMLleva,
+        PromoNxMPaga: promoSource.PromoNxMPaga,
         PromoVigencia: promoSource.PromoVigencia,
         PromoFechaInicio: promoSource.PromoFechaInicio,
         PromoFechaFin: promoSource.PromoFechaFin,
@@ -3511,6 +3609,8 @@ class SQLiteService {
     const catLower = categoriaInsumo.toLowerCase();
     if (catLower.includes('bebida') || catLower.includes('refresco')) {
       posCategoria = 'Bebidas';
+    } else if (catLower.includes('racion') || catLower.includes('acompañ')) {
+      posCategoria = 'Raciones';
     } else if (catLower.includes('pollo') || catLower.includes('carne')) {
       posCategoria = 'Pollo';
     } else if (catLower.includes('panad') || catLower.includes('harina')) {
@@ -3527,11 +3627,15 @@ class SQLiteService {
         PromoActiva: insumo?.PromoActiva,
         PromoTipo: insumo?.PromoTipo,
         PromoValor: insumo?.PromoValor,
+        PromoNxMLleva: insumo?.PromoNxMLleva,
+        PromoNxMPaga: insumo?.PromoNxMPaga,
         PromoVigencia: insumo?.PromoVigencia,
         PromoFechaInicio: insumo?.PromoFechaInicio,
         PromoFechaFin: insumo?.PromoFechaFin,
         PromoDiasSemana: insumo?.PromoDiasSemana,
         PromoEtiqueta: insumo?.PromoEtiqueta,
+        EsRacion: insumo?.EsRacion,
+        TamanoRacion: insumo?.TamanoRacionDefecto,
       });
 
       if (insumo && (insumo.PlatoId !== targetPlato.ID || insumo.PrecioVenta !== cleanPrice)) {
@@ -3549,15 +3653,19 @@ class SQLiteService {
         Precio: cleanPrice,
         Categoria: posCategoria,
         Imagen: defaultImg,
-        Descripcion: `Producto de venta directa listo para consumo inmediato (${nombre.trim()}).`,
+        Descripcion: `Producto listo para servir: ${nombre.trim()}.`,
         PromoActiva: insumo?.PromoActiva,
         PromoTipo: insumo?.PromoTipo,
         PromoValor: insumo?.PromoValor,
+        PromoNxMLleva: insumo?.PromoNxMLleva,
+        PromoNxMPaga: insumo?.PromoNxMPaga,
         PromoVigencia: insumo?.PromoVigencia,
         PromoFechaInicio: insumo?.PromoFechaInicio,
         PromoFechaFin: insumo?.PromoFechaFin,
         PromoDiasSemana: insumo?.PromoDiasSemana,
         PromoEtiqueta: insumo?.PromoEtiqueta,
+        EsRacion: insumo?.EsRacion,
+        TamanoRacion: insumo?.TamanoRacionDefecto,
       });
 
       if (insumo) {
