@@ -3679,6 +3679,129 @@ class SQLiteService {
     }
   }
 
+  /**
+   * Creates a brand-new Plato directly from Escandallos along with its initial kitchen recipe.
+   * Assigns an initial smart generic food image, saves to Platos & Recetas tables,
+   * and synchronizes with POS and the online menu.
+   */
+  public createPlatoWithReceta(
+    platoData: {
+      nombre: string;
+      precio: number;
+      categoria: string;
+      descripcion?: string;
+      imagen?: string;
+      promoActiva?: boolean;
+      promoTipo?: TipoPromocion;
+      promoValor?: number;
+      promoNxMLleva?: number;
+      promoNxMPaga?: number;
+      promoVigencia?: 'Siempre' | 'Intervalo' | 'DiasSemana';
+      promoFechaInicio?: string;
+      promoFechaFin?: string;
+      promoDiasSemana?: string;
+      promoEtiqueta?: string;
+      esRacion?: boolean;
+      tamanoRacion?: TamanoRacion;
+    },
+    ingredientes: Array<{
+      insumoId: number;
+      cantidad: number;
+      unidadMedida: UnidadMedida;
+      notas?: string;
+    }>
+  ): Plato {
+    const defaultImgName =
+      platoData.imagen && platoData.imagen.trim()
+        ? platoData.imagen.trim()
+        : `${platoData.categoria.toLowerCase().replace(/[^a-z0-9]/g, '_')}_especial.jpg`;
+
+    const newPlato = this.addPlato({
+      Plato: platoData.nombre.trim(),
+      Precio: safeParsePrice(platoData.precio),
+      Categoria: platoData.categoria.trim() || 'Pollo',
+      Imagen: defaultImgName,
+      Descripcion:
+        platoData.descripcion?.trim() ||
+        `Preparación culinaria artesanal: ${platoData.nombre.trim()}.`,
+      PromoActiva: platoData.promoActiva,
+      PromoTipo: platoData.promoTipo,
+      PromoValor: platoData.promoValor,
+      PromoNxMLleva: platoData.promoNxMLleva,
+      PromoNxMPaga: platoData.promoNxMPaga,
+      PromoVigencia: platoData.promoVigencia,
+      PromoFechaInicio: platoData.promoFechaInicio,
+      PromoFechaFin: platoData.promoFechaFin,
+      PromoDiasSemana: platoData.promoDiasSemana,
+      PromoEtiqueta: platoData.promoEtiqueta,
+      EsRacion: platoData.esRacion,
+      TamanoRacion: platoData.tamanoRacion,
+    });
+
+    if (ingredientes && ingredientes.length > 0) {
+      this.setRecetaForPlato(newPlato.ID, ingredientes);
+    }
+
+    return newPlato;
+  }
+
+  /**
+   * Purges orphan dishes imported from the SQLite database that have neither
+   * an active kitchen recipe in 'Recetas' nor a linked direct-sale inventory item
+   * (Insumos with EsVentaDirecta = 1).
+   * This aligns the POS catalog strictly with recipes and direct sales created or costed in Escandallos.
+   */
+  public purgePlatosHuerfanos(): { count: number; deletedPlatos: Plato[] } {
+    const allPlatos = this.getPlatos();
+    const allRecetas = this.getRecetas();
+    const allInsumos = this.getInsumos();
+
+    // Dish IDs that have culinary recipes
+    const platoIdsWithReceta = new Set<number>();
+    allRecetas.forEach((r) => {
+      if (r.PlatoId) platoIdsWithReceta.add(r.PlatoId);
+    });
+
+    // Insumos that are marked as direct sales
+    const directSaleInsumos = allInsumos.filter((i) => i.EsVentaDirecta);
+
+    const orphanPlatos: Plato[] = [];
+
+    allPlatos.forEach((plato) => {
+      const hasReceta = platoIdsWithReceta.has(plato.ID);
+      const isDirectSale = directSaleInsumos.some(
+        (ins) =>
+          ins.PlatoId === plato.ID ||
+          ins.Nombre.trim().toLowerCase() === plato.Plato.trim().toLowerCase()
+      );
+
+      if (!hasReceta && !isDirectSale) {
+        orphanPlatos.push(plato);
+      }
+    });
+
+    if (orphanPlatos.length === 0) {
+      return { count: 0, deletedPlatos: [] };
+    }
+
+    const orphanIds = orphanPlatos.map((p) => p.ID);
+
+    if (this.db) {
+      try {
+        const idListStr = orphanIds.join(',');
+        this.db.run(`DELETE FROM Platos WHERE ID IN (${idListStr})`);
+      } catch (err) {
+        console.error('Error purging orphan platos in DB:', err);
+      }
+    }
+
+    this.fallbackPlatos = this.fallbackPlatos.filter((p) => !orphanIds.includes(p.ID));
+    this.notify();
+    this.uploadDatabaseToServer();
+
+    return { count: orphanPlatos.length, deletedPlatos: orphanPlatos };
+  }
+
   // ==========================================
   // --- MOVIMIENTOS & KARDEX DE TRAZABILIDAD ---
   // ==========================================

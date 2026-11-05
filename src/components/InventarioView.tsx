@@ -149,10 +149,36 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
   const [dishEsRacion, setDishEsRacion] = useState<boolean>(false);
   const [dishTamanoRacion, setDishTamanoRacion] = useState<'Normal' | 'Mediana' | 'Grande'>('Normal');
 
+  // Manual Selling Price state for current selected dish in Escandallos
+  const [manualPrecioVenta, setManualPrecioVenta] = useState<number>(0);
+
+  // Escandallos tab filter ('todos' | 'conReceta' | 'ventaDirecta' | 'sinReceta')
+  const [escandalloFilter, setEscandalloFilter] = useState<'todos' | 'conReceta' | 'ventaDirecta' | 'sinReceta'>('todos');
+
+  // New Recipe / Escandallo Modal states
+  const [isNewRecetaModalOpen, setIsNewRecetaModalOpen] = useState(false);
+  const [newRecetaNombre, setNewRecetaNombre] = useState('');
+  const [newRecetaCategoria, setNewRecetaCategoria] = useState('Pollo');
+  const [newRecetaDescripcion, setNewRecetaDescripcion] = useState('');
+  const [newRecetaPrecioVenta, setNewRecetaPrecioVenta] = useState<number>(15000);
+  const [newRecetaIngredientes, setNewRecetaIngredientes] = useState<
+    Array<{
+      insumoId: number;
+      insumoNombre: string;
+      cantidad: number;
+      unidadMedida: UnidadMedida;
+      costoUnitario: number;
+      notas: string;
+    }>
+  >([]);
+  const [newRecetaInsumoIdSelect, setNewRecetaInsumoIdSelect] = useState<number | ''>('');
+  const [newRecetaCantidadInput, setNewRecetaCantidadInput] = useState<number>(1);
+  const [newRecetaNotasInput, setNewRecetaNotasInput] = useState<string>('');
+
   // Custom in-app confirmation modal for deletions (replaces window.confirm which fails in iframe sandbox)
   const [deleteModalState, setDeleteModalState] = useState<{
     isOpen: boolean;
-    type: 'insumo' | 'receta' | 'proveedor';
+    type: 'insumo' | 'receta' | 'proveedor' | 'plato' | 'purge_orphans';
     id: number;
     nombre: string;
     extraInfo?: string;
@@ -186,6 +212,16 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
       sqliteService.deleteProveedor(id);
       showToast(`Proveedor "${nombre}" eliminado.`);
       loadData();
+    } else if (type === 'plato') {
+      sqliteService.deletePlato(id);
+      showToast(`Plato "${nombre}" eliminado del catálogo y menú POS.`);
+      loadData();
+      if (onRefreshPlatos) onRefreshPlatos();
+    } else if (type === 'purge_orphans') {
+      const res = sqliteService.purgePlatosHuerfanos();
+      showToast(`¡Depuración completada! Se eliminaron ${res.count} platos sin receta ni venta directa.`);
+      loadData();
+      if (onRefreshPlatos) onRefreshPlatos();
     }
 
     setDeleteModalState(null);
@@ -313,9 +349,35 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
     [insumos]
   );
   const platosConReceta = useMemo(
-    () => escandallos.filter((e) => e.TieneReceta).length,
+    () => escandallos.filter((e) => e.TieneReceta && !e.EsVentaDirecta).length,
     [escandallos]
   );
+  const platosVentaDirecta = useMemo(
+    () => escandallos.filter((e) => e.EsVentaDirecta).length,
+    [escandallos]
+  );
+  const platosSinReceta = useMemo(
+    () =>
+      platos.filter((p) => {
+        const esc = escandallos.find((e) => e.PlatoId === p.ID);
+        return !esc?.TieneReceta && !esc?.EsVentaDirecta;
+      }),
+    [platos, escandallos]
+  );
+
+  const filteredEscandalloPlatos = useMemo(() => {
+    return platos.filter((plato) => {
+      const esc = escandallos.find((e) => e.PlatoId === plato.ID);
+      const hasReceta = esc && esc.TieneReceta && !esc.EsVentaDirecta;
+      const isDirectSale = Boolean(esc && esc.EsVentaDirecta);
+      const isOrphan = !esc?.TieneReceta && !esc?.EsVentaDirecta;
+
+      if (escandalloFilter === 'conReceta') return hasReceta;
+      if (escandalloFilter === 'ventaDirecta') return isDirectSale;
+      if (escandalloFilter === 'sinReceta') return isOrphan;
+      return true;
+    });
+  }, [platos, escandallos, escandalloFilter]);
 
   // Insumos Filtered
   const filteredInsumos = useMemo(() => {
@@ -374,9 +436,10 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
     };
   }, [selectedPlato, currentCalculatedFoodCost]);
 
-  // Sync selected dish promo configuration whenever dish changes
+  // Sync selected dish promo configuration and manual price whenever dish changes
   useEffect(() => {
     if (selectedPlato) {
+      setManualPrecioVenta(selectedPlato.Precio || 0);
       setDishPromoActiva(Boolean(selectedPlato.PromoActiva));
       setDishPromoTipo(selectedPlato.PromoTipo || 'Porcentaje');
       setDishPromoValor(selectedPlato.PromoValor != null && selectedPlato.PromoValor > 0 ? selectedPlato.PromoValor : 15);
@@ -392,6 +455,107 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
       setDishTamanoRacion(selectedPlato.TamanoRacion || 'Normal');
     }
   }, [selectedPlatoId, selectedPlato]);
+
+  // Save Manual Selling Price directly from Escandallos tab
+  const handleSaveManualPrice = () => {
+    if (!selectedPlato) return;
+    const cleanPrice = safeParsePrice(manualPrecioVenta);
+    if (cleanPrice <= 0) {
+      showToast('Introduce un precio válido mayor a 0');
+      return;
+    }
+    sqliteService.updatePlato({
+      ...selectedPlato,
+      Precio: cleanPrice,
+    });
+    if (selectedEscandallo?.InsumoId) {
+      const ins = insumos.find((i) => i.InsumoId === selectedEscandallo.InsumoId);
+      if (ins) {
+        sqliteService.updateInsumo({
+          ...ins,
+          PrecioVenta: cleanPrice,
+        });
+      }
+    }
+    showToast(`¡Precio de "${selectedPlato.Plato}" fijado a $${cleanPrice.toFixed(2)} en el menú POS!`);
+    loadData();
+    if (onRefreshPlatos) onRefreshPlatos();
+  };
+
+  // Open New Culinary Recipe Modal
+  const openNewRecetaModal = () => {
+    setNewRecetaNombre('');
+    setNewRecetaCategoria('Pollo');
+    setNewRecetaDescripcion('');
+    setNewRecetaPrecioVenta(15000);
+    setNewRecetaIngredientes([]);
+    setNewRecetaInsumoIdSelect(insumos.length > 0 ? insumos[0].InsumoId : '');
+    setNewRecetaCantidadInput(1);
+    setNewRecetaNotasInput('');
+    setIsNewRecetaModalOpen(true);
+  };
+
+  // Add an ingredient to the new recipe builder
+  const handleAddNewRecetaIngrediente = () => {
+    if (!newRecetaInsumoIdSelect) return;
+    const selectedIns = insumos.find((i) => i.InsumoId === Number(newRecetaInsumoIdSelect));
+    if (!selectedIns) return;
+
+    setNewRecetaIngredientes((prev) => [
+      ...prev,
+      {
+        insumoId: selectedIns.InsumoId,
+        insumoNombre: selectedIns.Nombre,
+        cantidad: newRecetaCantidadInput > 0 ? newRecetaCantidadInput : 1,
+        unidadMedida: selectedIns.UnidadMedida,
+        costoUnitario: selectedIns.CostoUnitario,
+        notas: newRecetaNotasInput.trim(),
+      },
+    ]);
+    setNewRecetaCantidadInput(1);
+    setNewRecetaNotasInput('');
+  };
+
+  // Remove an ingredient from the new recipe builder
+  const handleRemoveNewRecetaIngrediente = (index: number) => {
+    setNewRecetaIngredientes((prev) => prev.filter((_, idx) => idx !== index));
+  };
+
+  // Save new recipe and create dish in Platos & Recetas
+  const handleSaveNewReceta = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newRecetaNombre.trim()) {
+      showToast('Por favor introduce el nombre del plato / receta.');
+      return;
+    }
+    const cleanPrice = safeParsePrice(newRecetaPrecioVenta);
+    if (cleanPrice <= 0) {
+      showToast('Introduce un precio de venta válido mayor a 0.');
+      return;
+    }
+
+    const created = sqliteService.createPlatoWithReceta(
+      {
+        nombre: newRecetaNombre.trim(),
+        categoria: newRecetaCategoria.trim() || 'Pollo',
+        descripcion: newRecetaDescripcion.trim(),
+        precio: cleanPrice,
+      },
+      newRecetaIngredientes.map((ing) => ({
+        insumoId: ing.insumoId,
+        cantidad: ing.cantidad,
+        unidadMedida: ing.unidadMedida,
+        notas: ing.notas,
+      }))
+    );
+
+    setIsNewRecetaModalOpen(false);
+    showToast(`¡Receta y plato "${created.Plato}" creados y publicados en la carta POS!`);
+    loadData();
+    setSelectedPlatoId(created.ID);
+    setSubTab('escandallos');
+    if (onRefreshPlatos) onRefreshPlatos();
+  };
 
   // Save Dish Promotion directly from Escandallos tab
   const handleSaveDishPromo = () => {
@@ -1302,6 +1466,16 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
                 </button>
 
                 <button
+                  type="button"
+                  onClick={openNewRecetaModal}
+                  className="flex items-center space-x-2 px-3.5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs sm:text-sm font-bold transition-all shadow-md active:scale-95 cursor-pointer"
+                  title="Crear nueva ficha técnica culinaria y plato en carta"
+                >
+                  <ChefHat className="w-4 h-4" />
+                  <span>+ Nueva Receta</span>
+                </button>
+
+                <button
                   onClick={() => openNewInsumoModal(true)}
                   className="flex items-center space-x-2 px-3.5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs sm:text-sm font-bold transition-all shadow-md active:scale-95 cursor-pointer"
                   title="Registrar producto de venta directa con estructura de costos y margen"
@@ -1546,96 +1720,216 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             {/* Left 4 Cols: Platos List */}
             <div className="lg:col-span-4 bg-stone-900 border border-stone-800 rounded-2xl p-4 flex flex-col h-[700px]">
-              <div className="mb-3 flex items-center justify-between">
-                <div>
-                  <h3 className="font-black text-white text-base">Seleccionar Plato</h3>
-                  <p className="text-xs text-stone-400">
-                    {platos.length} platos ({platosConReceta} con escandallo)
-                  </p>
+              <div className="mb-3 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-black text-white text-base">Seleccionar Plato</h3>
+                    <p className="text-xs text-stone-400">
+                      {platos.length} platos en carta ({platosConReceta} recetas, {platosVentaDirecta} venta directa)
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={openNewRecetaModal}
+                      title="Crear nueva receta culinaria y plato en carta"
+                      className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 text-xs font-black transition-all shadow-md active:scale-95 cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>+ Nueva Receta</span>
+                    </button>
+                    <button
+                      onClick={handlePrintEscandallosGeneral}
+                      title="Imprimir reporte general de escandallos y márgenes del menú"
+                      className="flex items-center space-x-1 px-2 py-1.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700 text-xs font-bold transition-all shadow-sm cursor-pointer"
+                    >
+                      <Printer className="w-3.5 h-3.5 text-emerald-400" />
+                      <span className="hidden sm:inline">Imprimir</span>
+                    </button>
+                  </div>
                 </div>
-                <button
-                  onClick={handlePrintEscandallosGeneral}
-                  title="Imprimir reporte general de escandallos y márgenes del menú"
-                  className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-200 border border-stone-700 text-xs font-bold transition-all shadow-sm cursor-pointer"
-                >
-                  <Printer className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Imprimir Todos</span>
-                </button>
+
+                {/* Filter Pills */}
+                <div className="grid grid-cols-4 gap-1 bg-stone-950 p-1 rounded-xl border border-stone-800 text-[10px] font-bold">
+                  <button
+                    type="button"
+                    onClick={() => setEscandalloFilter('todos')}
+                    className={`py-1.5 px-1 rounded-lg text-center transition-colors cursor-pointer truncate ${
+                      escandalloFilter === 'todos'
+                        ? 'bg-stone-800 text-white shadow-xs'
+                        : 'text-stone-400 hover:text-white'
+                    }`}
+                  >
+                    Todos ({platos.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEscandalloFilter('conReceta')}
+                    className={`py-1.5 px-1 rounded-lg text-center transition-colors cursor-pointer truncate ${
+                      escandalloFilter === 'conReceta'
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'text-stone-400 hover:text-white'
+                    }`}
+                  >
+                    Recetas ({platosConReceta})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEscandalloFilter('ventaDirecta')}
+                    className={`py-1.5 px-1 rounded-lg text-center transition-colors cursor-pointer truncate ${
+                      escandalloFilter === 'ventaDirecta'
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'text-stone-400 hover:text-white'
+                    }`}
+                  >
+                    Directa ({platosVentaDirecta})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEscandalloFilter('sinReceta')}
+                    className={`py-1.5 px-1 rounded-lg text-center transition-colors cursor-pointer truncate ${
+                      escandalloFilter === 'sinReceta'
+                        ? 'bg-rose-600 text-white shadow-xs'
+                        : 'text-stone-400 hover:text-white'
+                    }`}
+                  >
+                    Sin Receta ({platosSinReceta.length})
+                  </button>
+                </div>
+
+                {/* Banner alert if there are orphan dishes imported without recipes */}
+                {platosSinReceta.length > 0 && (
+                  <div className="p-2.5 bg-rose-500/10 border border-rose-500/30 rounded-xl flex items-center justify-between gap-2 animate-in fade-in">
+                    <div className="overflow-hidden">
+                      <span className="text-xs font-black text-rose-300 block truncate">
+                        ⚠️ {platosSinReceta.length} platos sin escandallo
+                      </span>
+                      <span className="text-[10px] text-stone-400 block leading-tight">
+                        Importados de BD sin receta ni costo
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setDeleteModalState({
+                          isOpen: true,
+                          type: 'purge_orphans',
+                          id: 0,
+                          nombre: `${platosSinReceta.length} Platos Huérfanos sin Receta`,
+                          extraInfo:
+                            'Se eliminarán de la tabla Platos los productos que no tienen receta de cocina ni pertenecen a venta directa. De esta forma, el POS y la carta quedarán 100% sincronizados con tus Escandallos.',
+                        })
+                      }
+                      className="px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-black transition-all shadow-sm flex items-center gap-1 cursor-pointer shrink-0 active:scale-95"
+                      title="Depurar y eliminar todos los platos sin receta"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Depurar</span>
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Platos Scrollable List */}
               <div className="flex-1 overflow-y-auto space-y-2 pr-1 scrollbar-thin">
-                {platos.map((plato) => {
-                  const isSelected = selectedPlatoId === plato.ID;
-                  const esc = escandallos.find((e) => e.PlatoId === plato.ID);
-                  const hasRecipe = esc && esc.TieneReceta;
+                {filteredEscandalloPlatos.length === 0 ? (
+                  <div className="text-center py-8 text-stone-500 text-xs">
+                    No hay platos en esta categoría de filtro.
+                  </div>
+                ) : (
+                  filteredEscandalloPlatos.map((plato) => {
+                    const isSelected = selectedPlatoId === plato.ID;
+                    const esc = escandallos.find((e) => e.PlatoId === plato.ID);
+                    const hasRecipe = esc && esc.TieneReceta;
 
-                  return (
-                    <button
-                      key={plato.ID}
-                      onClick={() => setSelectedPlatoId(plato.ID)}
-                      className={`w-full text-left p-3 rounded-xl border transition-all flex items-center justify-between cursor-pointer ${
-                        isSelected
-                          ? 'bg-amber-500/20 border-amber-500 text-white shadow-md'
-                          : 'bg-stone-950/60 border-stone-800 text-stone-300 hover:border-stone-700 hover:bg-stone-800/40'
-                      }`}
-                    >
-                      <div className="overflow-hidden pr-2">
-                        <span className="font-bold text-sm block truncate">{plato.Plato}</span>
-                        <div className="flex items-center space-x-2 text-[11px] text-stone-400">
-                          <span>{plato.Categoria}</span>
-                          <span>•</span>
-                          <span className="text-amber-400 font-mono font-bold">${plato.Precio.toFixed(2)}</span>
-                          {esc?.PromoActiva && (
-                            <span className="px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300 font-bold text-[9px] border border-rose-500/30">
-                              🔥 Promo
+                    return (
+                      <button
+                        key={plato.ID}
+                        onClick={() => setSelectedPlatoId(plato.ID)}
+                        className={`w-full text-left p-3 rounded-xl border transition-all flex items-center justify-between cursor-pointer ${
+                          isSelected
+                            ? 'bg-amber-500/20 border-amber-500 text-white shadow-md'
+                            : 'bg-stone-950/60 border-stone-800 text-stone-300 hover:border-stone-700 hover:bg-stone-800/40'
+                        }`}
+                      >
+                        <div className="overflow-hidden pr-2">
+                          <span className="font-bold text-sm block truncate">{plato.Plato}</span>
+                          <div className="flex items-center space-x-2 text-[11px] text-stone-400">
+                            <span>{plato.Categoria}</span>
+                            <span>•</span>
+                            <span className="text-amber-400 font-mono font-bold">${plato.Precio.toFixed(2)}</span>
+                            {esc?.PromoActiva && (
+                              <span className="px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300 font-bold text-[9px] border border-rose-500/30">
+                                🔥 Promo
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {hasRecipe ? (
+                            esc?.EsVentaDirecta ? (
+                              <span className="shrink-0 px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30 text-[10px] font-bold flex items-center gap-1">
+                                <Package className="w-3 h-3" />
+                                Directa
+                              </span>
+                            ) : (
+                              <span className="shrink-0 px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold flex items-center gap-1">
+                                <Check className="w-3 h-3" />
+                                Escandallo
+                              </span>
+                            )
+                          ) : (
+                            <span className="shrink-0 px-2 py-0.5 rounded-full bg-stone-800 text-stone-500 text-[10px]">
+                              Sin receta
                             </span>
                           )}
+
+                          {hasRecipe && !esc?.EsVentaDirecta && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setDeleteModalState({
+                                  isOpen: true,
+                                  type: 'receta',
+                                  id: plato.ID,
+                                  nombre: plato.Plato,
+                                  extraInfo: 'Se eliminarán todos los ingredientes de la ficha técnica y este plato volverá a estado "Sin receta".',
+                                });
+                              }}
+                              title="Eliminar Ficha Técnica / Receta"
+                              className="p-1 rounded-md bg-stone-900 hover:bg-rose-600/30 text-stone-500 hover:text-rose-400 border border-stone-800 transition-colors cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+
+                          {/* Delete button for orphan dish */}
+                          {!hasRecipe && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setDeleteModalState({
+                                  isOpen: true,
+                                  type: 'plato',
+                                  id: plato.ID,
+                                  nombre: plato.Plato,
+                                  extraInfo: 'Se eliminará este plato sin receta de la base de datos y de la carta del POS.',
+                                });
+                              }}
+                              title="Eliminar plato huérfano sin receta"
+                              className="p-1 rounded-md bg-stone-900 hover:bg-rose-600/30 text-stone-500 hover:text-rose-400 border border-stone-800 transition-colors cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
-                      </div>
-
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        {hasRecipe ? (
-                          esc?.EsVentaDirecta ? (
-                            <span className="shrink-0 px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30 text-[10px] font-bold flex items-center gap-1">
-                              <Package className="w-3 h-3" />
-                              Venta Directa
-                            </span>
-                          ) : (
-                            <span className="shrink-0 px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold flex items-center gap-1">
-                              <Check className="w-3 h-3" />
-                              Escandallo
-                            </span>
-                          )
-                        ) : (
-                          <span className="shrink-0 px-2 py-0.5 rounded-full bg-stone-800 text-stone-500 text-[10px]">
-                            Sin receta
-                          </span>
-                        )}
-
-                        {hasRecipe && !esc?.EsVentaDirecta && (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setDeleteModalState({
-                                isOpen: true,
-                                type: 'receta',
-                                id: plato.ID,
-                                nombre: plato.Plato,
-                                extraInfo: 'Se eliminarán todos los ingredientes de la ficha técnica y este plato volverá a estado "Sin receta".',
-                              });
-                            }}
-                            title="Eliminar Ficha Técnica / Receta"
-                            className="p-1 rounded-md bg-stone-900 hover:bg-rose-600/30 text-stone-500 hover:text-rose-400 border border-stone-800 transition-colors cursor-pointer"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
-                    </button>
-                  );
-                })}
+                      </button>
+                    );
+                  })
+                )}
               </div>
             </div>
 
@@ -1769,6 +2063,107 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
                               Costo Alto (&gt;45%)
                             </span>
                           )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Selector y Fijación de Precio de Venta Manual Libre */}
+                    <div className="mt-5 p-4 rounded-xl bg-stone-950 border border-stone-800 space-y-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div>
+                          <span className="text-xs font-black uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+                            <DollarSign className="w-4 h-4" />
+                            Fijar Precio de Venta Manual al Menú POS (Libre Elección)
+                          </span>
+                          <p className="text-[11px] text-stone-400 mt-0.5">
+                            Coloca el precio exacto que quieras para la carta del POS. El sistema calcula en vivo tu margen bruto y porcentaje de food cost.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+                        <div className="sm:col-span-5">
+                          <label className="text-[11px] font-bold text-stone-300 block mb-1">
+                            Precio de Venta en Menú POS ($):
+                          </label>
+                          <div className="relative">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 font-bold font-mono">$</span>
+                            <input
+                              type="number"
+                              step="any"
+                              min="0"
+                              value={manualPrecioVenta || ''}
+                              onChange={(e) => setManualPrecioVenta(safeParsePrice(e.target.value))}
+                              placeholder="ej: 18500"
+                              className="w-full bg-stone-900 border border-stone-700 rounded-xl pl-8 pr-4 py-2.5 text-base font-black font-mono text-white focus:outline-none focus:border-amber-400"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="sm:col-span-4">
+                          {(() => {
+                            const p = manualPrecioVenta;
+                            const c = pricingAnalysis.costo;
+                            const m = p - c;
+                            const mpct = p > 0 ? (m / p) * 100 : 0;
+                            const isLoss = p > 0 && p < c;
+                            return (
+                              <div className="p-2.5 rounded-xl bg-stone-900 border border-stone-800 text-[11px]">
+                                <div className="flex justify-between items-center text-stone-300">
+                                  <span>Margen resultante:</span>
+                                  <span className={`font-mono font-bold ${isLoss ? 'text-rose-400' : mpct >= 50 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                                    ${m.toLocaleString()} ({mpct.toFixed(1)}%)
+                                  </span>
+                                </div>
+                                {isLoss && (
+                                  <span className="text-[10px] text-rose-400 font-bold block mt-1">
+                                    ⚠️ ¡Por debajo del costo! Pérdida de ${Math.abs(m).toLocaleString()}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </div>
+
+                        <div className="sm:col-span-3">
+                          <button
+                            type="button"
+                            onClick={handleSaveManualPrice}
+                            className="w-full py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-black text-xs transition-all shadow-md active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
+                          >
+                            <Save className="w-4 h-4" />
+                            <span>Guardar en POS</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Quick margin buttons that fill the manual price */}
+                      <div className="flex items-center gap-2 pt-1 border-t border-stone-800/80">
+                        <span className="text-[10px] uppercase font-bold text-stone-500">
+                          Cargar sugerencia rápida al campo:
+                        </span>
+                        <div className="flex flex-wrap gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setManualPrecioVenta(Math.round(pricingAnalysis.precioSugerido50))}
+                            className="px-2 py-1 rounded bg-stone-900 hover:bg-stone-800 border border-stone-800 text-stone-300 text-[11px] font-mono font-bold cursor-pointer transition-colors"
+                          >
+                            50% (${Math.round(pricingAnalysis.precioSugerido50).toLocaleString()})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setManualPrecioVenta(Math.round(pricingAnalysis.precioSugerido60))}
+                            className="px-2 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-[11px] font-mono font-bold cursor-pointer transition-colors"
+                          >
+                            60% (${Math.round(pricingAnalysis.precioSugerido60).toLocaleString()})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setManualPrecioVenta(Math.round(pricingAnalysis.precioSugerido70))}
+                            className="px-2 py-1 rounded bg-stone-900 hover:bg-stone-800 border border-stone-800 text-stone-300 text-[11px] font-mono font-bold cursor-pointer transition-colors"
+                          >
+                            70% (${Math.round(pricingAnalysis.precioSugerido70).toLocaleString()})
+                          </button>
                         </div>
                       </div>
                     </div>
