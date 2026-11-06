@@ -28,6 +28,7 @@ import { Plato, FormaPago } from './types';
 import { imageService } from './services/imageService';
 import { menuSyncService } from './services/menuSyncService';
 import { formatCurrency } from './utils/currency';
+import { calculatePromoPrice } from './utils/promo';
 import { DigitalMenuOrderPayload } from './utils/whatsappParser';
 import { BrandLogo } from './components/BrandLogo';
 
@@ -135,7 +136,10 @@ export const CustomerApp: React.FC = () => {
   }, [cart]);
 
   const cartTotalPrice = useMemo(() => {
-    return cart.reduce((acc, i) => acc + i.cantidad * i.plato.Precio, 0);
+    return cart.reduce((acc, i) => {
+      const promo = calculatePromoPrice(i.plato.Precio, i.plato);
+      return acc + i.cantidad * promo.finalPrice;
+    }, 0);
   }, [cart]);
 
   const addToCart = (plato: Plato) => {
@@ -418,6 +422,7 @@ export const CustomerApp: React.FC = () => {
             {filteredPlatos.map((plato) => {
               const inCartItem = cart.find((i) => i.plato.ID === plato.ID);
               const imageUrl = imageService.getImageUrl(plato.Imagen, plato.Categoria, plato.Plato, plato.ID);
+              const promo = calculatePromoPrice(plato.Precio, plato);
 
               return (
                 <div
@@ -442,6 +447,21 @@ export const CustomerApp: React.FC = () => {
                         {plato.Categoria || 'Especialidad'}
                       </span>
                     </div>
+
+                    {/* Mancha / Sello Vistoso de Promoción */}
+                    {promo.isPromoActive && (
+                      <div className="absolute top-2.5 right-2.5 z-10 pointer-events-none animate-in fade-in zoom-in-95 duration-150">
+                        <div className="relative">
+                          <span className="absolute -inset-1 rounded-full bg-red-600/60 blur-xs animate-pulse" />
+                          <div className="relative px-2.5 py-1 rounded-full bg-gradient-to-br from-rose-600 via-red-600 to-amber-500 border border-yellow-300 shadow-xl shadow-red-950/70 flex items-center gap-1">
+                            <span className="text-white text-xs drop-shadow leading-none">🔥</span>
+                            <span className="text-[11px] font-black text-white uppercase tracking-wider font-mono drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)] whitespace-nowrap">
+                              {promo.badgeLabel || 'PROMO'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Dish Info */}
@@ -460,9 +480,16 @@ export const CustomerApp: React.FC = () => {
                     <div className="pt-2 border-t border-stone-800/80 flex items-center justify-between">
                       <div>
                         <span className="text-[10px] text-stone-400 block font-medium">Precio</span>
-                        <span className="text-lg font-black text-amber-400 font-mono">
-                          {formatCurrency(plato.Precio)}
-                        </span>
+                        <div className="flex items-baseline space-x-1.5">
+                          <span className="text-lg font-black text-amber-400 font-mono">
+                            {formatCurrency(promo.finalPrice)}
+                          </span>
+                          {promo.isPromoActive && (
+                            <span className="text-xs text-stone-500 line-through font-mono">
+                              {formatCurrency(promo.basePrice)}
+                            </span>
+                          )}
+                        </div>
                       </div>
 
                       {inCartItem ? (

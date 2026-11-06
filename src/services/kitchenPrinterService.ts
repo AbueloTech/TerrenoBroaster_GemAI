@@ -32,7 +32,9 @@ class KitchenPrinterService {
   private bluetoothDevice: any = null;
   private printCharacteristic: any = null;
   private connectedPrinterName: string = '';
-  private autoPrintEnabled: boolean = true;
+  // Default to false: kitchen comanda is strictly for Bluetooth kitchen printer.
+  // Never hijack cashier's 80mm printer automatically!
+  private autoPrintEnabled: boolean = false;
   private activeTicket: KitchenTicketData | null = null;
   private onTicketChangeCallbacks: Set<(ticket: KitchenTicketData | null) => void> = new Set();
   private onConnectionChangeCallbacks: Set<(connected: boolean, name: string) => void> = new Set();
@@ -281,10 +283,10 @@ class KitchenPrinterService {
 
     // Center alignment
     bytes.push(0x1b, 0x61, 0x01);
-    addStr('¡PREPARAR CON PRIORIDAD!\n\n\n\n');
+    addStr('¡PREPARAR CON PRIORIDAD!\n\n');
 
-    // GS V 66 0 : Cut paper
-    bytes.push(0x1d, 0x56, 0x42, 0x00);
+    // GS V 0 : Full cut paper immediately
+    bytes.push(0x1d, 0x56, 0x00);
 
     return new Uint8Array(bytes);
   }
@@ -319,11 +321,210 @@ class KitchenPrinterService {
     }
   }
 
+  private isPrintLocked: boolean = false;
+
   /**
-   * Print Kitchen Ticket (Dispatches to Bluetooth if connected, and opens ticket modal)
+   * Prints an 80mm thermal kitchen ticket via an isolated hidden iframe.
+   * This guarantees:
+   * 1. ZERO duplication (no double-render from modals or concurrent events).
+   * 2. ZERO paper waste (strict @page size: 80mm auto, height fits content exactly).
+   * 3. Clean end cut without feeding an entire A4 page!
+   */
+  public printKitchenTicketViaBrowser(data: KitchenTicketData): void {
+    if (this.isPrintLocked) {
+      console.warn('[ThermalPrint] Print in progress, ignoring duplicate call');
+      return;
+    }
+    this.isPrintLocked = true;
+    setTimeout(() => {
+      this.isPrintLocked = false;
+    }, 2500);
+
+    if (typeof document === 'undefined') return;
+
+    // Remove any previous temporary print iframes
+    const existing = document.getElementById('tb-thermal-kitchen-iframe');
+    if (existing && existing.parentNode) {
+      existing.parentNode.removeChild(existing);
+    }
+
+    const iframe = document.createElement('iframe');
+    iframe.id = 'tb-thermal-kitchen-iframe';
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0px';
+    iframe.style.height = '0px';
+    iframe.style.border = 'none';
+    iframe.style.zIndex = '-9999';
+    iframe.style.opacity = '0';
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentWindow?.document;
+    if (!doc) {
+      window.print();
+      return;
+    }
+
+    const itemsHtml = data.items
+      .map(
+        (item) => `
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px; font-size: 13px;">
+        <span style="font-weight: 900; width: 36px; flex-shrink: 0;">${item.cantidad}x</span>
+        <span style="font-weight: 800; flex: 1; text-align: left; line-height: 1.2;">${item.nombre}</span>
+      </div>
+      ${
+        item.notas && item.notas.trim()
+          ? `
+        <div style="margin-left: 36px; font-size: 11px; font-weight: bold; background: #f0f0f0; padding: 2px 4px; border-left: 2px solid #000; margin-bottom: 4px;">
+          ⚠️ NOTA: ${item.notas.trim()}
+        </div>
+      `
+          : ''
+      }
+    `
+      )
+      .join('');
+
+    const totalCant = data.items.reduce((acc, i) => acc + i.cantidad, 0);
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Comanda #${data.nTicket}</title>
+          <style>
+            @page {
+              size: 80mm auto;
+              margin: 0mm !important;
+            }
+            * {
+              box-sizing: border-box;
+            }
+            html, body {
+              width: 76mm;
+              margin: 0 auto;
+              padding: 0;
+              background: #ffffff;
+              color: #000000;
+              font-family: 'Courier New', Courier, monospace;
+              font-size: 12px;
+              line-height: 1.2;
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+            }
+            .ticket-wrap {
+              width: 74mm;
+              margin: 0 auto;
+              padding: 1.5mm 1mm 2mm 1mm;
+            }
+            .center { text-align: center; }
+            .bold { font-weight: 900; }
+            .dashed { border-top: 1px dashed #000; margin: 4px 0; }
+            .double-dashed { border-top: 2px dashed #000; margin: 5px 0; }
+            .box {
+              border: 2px solid #000;
+              padding: 3px;
+              margin: 4px 0;
+              font-size: 15px;
+              font-weight: 900;
+              text-align: center;
+              text-transform: uppercase;
+            }
+            .cut-line {
+              text-align: center;
+              font-size: 9px;
+              margin-top: 6px;
+              padding-top: 3px;
+              border-top: 1px dotted #000;
+              letter-spacing: 1px;
+              font-weight: bold;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="ticket-wrap">
+            <div class="center bold" style="font-size: 16px; letter-spacing: 1px;">*** COCINA ***</div>
+            <div class="center bold" style="font-size: 12px;">TERRENO BROASTER</div>
+            
+            <div class="box">[ ${data.ubicacion.toUpperCase()} ]</div>
+
+            <div style="font-size: 11px; margin: 3px 0;">
+              <div style="display: flex; justify-content: space-between;">
+                <span class="bold">N° TICKET:</span>
+                <span class="bold" style="font-size: 13px;">#${data.nTicket}</span>
+              </div>
+              <div style="display: flex; justify-content: space-between;">
+                <span>FECHA:</span>
+                <span>${data.fecha}</span>
+              </div>
+              <div style="display: flex; justify-content: space-between;">
+                <span>CLIENTE:</span>
+                <span class="bold">${data.cliente}</span>
+              </div>
+              <div style="display: flex; justify-content: space-between;">
+                <span>SERVICIO:</span>
+                <span class="bold" style="text-transform: uppercase;">${data.tipoServicio}</span>
+              </div>
+              ${data.telefono ? `<div style="display: flex; justify-content: space-between;"><span>TEL:</span><span>${data.telefono}</span></div>` : ''}
+              ${data.direccion ? `<div style="margin-top: 2px;"><span class="bold">DIR: </span><span>${data.direccion}</span></div>` : ''}
+              ${
+                data.notas
+                  ? `
+                <div style="margin-top: 3px; background: #eee; padding: 2px 4px; font-weight: bold; font-size: 10px;">
+                  NOTA: ${data.notas}
+                </div>
+              `
+                  : ''
+              }
+            </div>
+
+            <div class="double-dashed"></div>
+            <div style="display: flex; justify-content: space-between; font-size: 11px; font-weight: 900; margin-bottom: 2px;">
+              <span>CANT</span>
+              <span style="flex: 1; text-align: left; margin-left: 12px;">PRODUCTO / PLATO</span>
+            </div>
+            <div class="dashed"></div>
+
+            ${itemsHtml}
+
+            <div class="double-dashed"></div>
+            <div class="center bold" style="font-size: 13px;">TOTAL PRODUCTOS: ${totalCant}</div>
+            <div class="center bold" style="font-size: 11px; margin-top: 3px;">¡PREPARAR CON PRIORIDAD!</div>
+            
+            <div class="cut-line">✂ - - - CORTE DE COMANDA - - - ✂</div>
+          </div>
+        </body>
+      </html>
+    `;
+
+    doc.open();
+    doc.write(htmlContent);
+    doc.close();
+
+    // Trigger print
+    setTimeout(() => {
+      try {
+        iframe.contentWindow?.focus();
+        iframe.contentWindow?.print();
+      } catch (err) {
+        console.error('Error triggering iframe print:', err);
+      } finally {
+        setTimeout(() => {
+          if (iframe.parentNode) {
+            iframe.parentNode.removeChild(iframe);
+          }
+        }, 4000);
+      }
+    }, 200);
+  }
+
+  /**
+   * Print Kitchen Ticket (Dispatches to Bluetooth if connected, or isolated thermal print)
    */
   public async printComanda(ticket: KitchenTicketData): Promise<{ printedViaBluetooth: boolean; error?: string }> {
-    // Notify active ticket modal
+    // Notify active ticket modal so user can view/inspect on screen
     this.notifyTicket(ticket);
 
     // If Bluetooth printer is connected, send direct ESC/POS command
@@ -335,11 +536,9 @@ class KitchenPrinterService {
       return { printedViaBluetooth: false, error: res.error };
     }
 
-    // If not connected via Bluetooth, trigger browser print dialog automatically if enabled
+    // If not connected via Bluetooth, trigger isolated 80mm thermal print dialog automatically if enabled
     if (this.autoPrintEnabled) {
-      setTimeout(() => {
-        window.print();
-      }, 300);
+      this.printKitchenTicketViaBrowser(ticket);
     }
 
     return { printedViaBluetooth: false };

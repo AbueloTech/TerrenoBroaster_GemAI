@@ -150,37 +150,71 @@ html.theme-light .shadow-lg {
   box-shadow: 0 4px 6px -1px rgba(15, 23, 42, 0.1), 0 2px 4px -2px rgba(15, 23, 42, 0.06) !important;
 }
 
+@page {
+  size: 80mm auto;
+  margin: 0mm !important;
+}
+
 @media print {
+  html, body {
+    width: 80mm !important;
+    max-width: 80mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: hidden !important;
+  }
+
   body * {
     visibility: hidden;
   }
-  #thermal-receipt, #thermal-receipt * {
+
+  /* When printing thermal cashier sale receipt */
+  body:not(:has(#kitchen-receipt:hover)) #thermal-receipt,
+  #thermal-receipt, 
+  #thermal-receipt * {
     visibility: visible;
   }
   #thermal-receipt {
     position: absolute;
     left: 0;
     top: 0;
-    width: 80mm !important;
-    padding: 2mm !important;
+    width: 76mm !important;
+    max-width: 76mm !important;
+    padding: 1.5mm 1mm 2mm 1mm !important;
     margin: 0 !important;
     color: #000000 !important;
     background: #ffffff !important;
+    font-family: 'Courier New', Courier, monospace !important;
+    height: auto !important;
+    page-break-after: avoid !important;
+    page-break-inside: avoid !important;
   }
 
-  #kitchen-receipt, #kitchen-receipt * {
-    visibility: visible;
+  /* Kitchen receipt must NEVER be printed together with thermal cashier receipt */
+  body:has(#thermal-receipt) #kitchen-receipt {
+    display: none !important;
+    visibility: hidden !important;
   }
+
   #kitchen-receipt {
     position: absolute;
     left: 0;
     top: 0;
-    width: 80mm !important;
-    padding: 3mm !important;
+    width: 76mm !important;
+    max-width: 76mm !important;
+    padding: 1.5mm 1mm 2mm 1mm !important;
     margin: 0 !important;
     color: #000000 !important;
     background: #ffffff !important;
-    font-family: monospace !important;
+    font-family: 'Courier New', Courier, monospace !important;
+    height: auto !important;
+    page-break-after: avoid !important;
+    page-break-inside: avoid !important;
   }
 
   #printable-report, #printable-report * {

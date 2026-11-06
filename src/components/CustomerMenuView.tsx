@@ -404,11 +404,17 @@ export const CustomerMenuView: React.FC<CustomerMenuViewProps> = ({
                       {plato.Categoria}
                     </span>
 
-                    {/* Diagonal Promo Ribbon */}
+                    {/* Mancha / Sello Vistoso de Promoción */}
                     {promo.isPromoActive && (
-                      <div className="absolute -top-1 -right-1 w-24 h-24 overflow-hidden pointer-events-none z-20">
-                        <div className="absolute top-4 -right-7 w-28 transform rotate-45 bg-gradient-to-r from-red-600 via-rose-600 to-amber-500 text-white font-black text-[9px] tracking-wider py-0.5 text-center shadow-lg uppercase border-y border-yellow-300/40">
-                          🔥 {promo.badgeLabel}
+                      <div className="absolute top-2 right-2 z-20 pointer-events-none animate-in fade-in zoom-in-95 duration-150">
+                        <div className="relative">
+                          <span className="absolute -inset-1 rounded-full bg-red-600/60 blur-xs animate-pulse" />
+                          <div className="relative px-2.5 py-1 rounded-full bg-gradient-to-br from-rose-600 via-red-600 to-amber-500 border border-yellow-300 shadow-xl shadow-red-950/70 flex items-center gap-1">
+                            <span className="text-white text-xs drop-shadow leading-none">🔥</span>
+                            <span className="text-[11px] font-black text-white uppercase tracking-wider font-mono drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)] whitespace-nowrap">
+                              {promo.badgeLabel || 'PROMO'}
+                            </span>
+                          </div>
                         </div>
                       </div>
                     )}

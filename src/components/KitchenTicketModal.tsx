@@ -97,7 +97,9 @@ export const KitchenTicketModal: React.FC<KitchenTicketModalProps> = ({
   };
 
   const handlePrintBrowser = () => {
-    window.print();
+    if (activeTicket) {
+      kitchenPrinterService.printKitchenTicketViaBrowser(activeTicket);
+    }
   };
 
   const totalItems = activeTicket.items.reduce((acc, i) => acc + i.cantidad, 0);
@@ -264,7 +266,7 @@ export const KitchenTicketModal: React.FC<KitchenTicketModalProps> = ({
           >
             <Bluetooth className="w-4 h-4" />
             <span>
-              {isBluetoothConnected ? 'Imprimir Vía Bluetooth' : 'Conectar Impresora Bluetooth'}
+              {isBluetoothConnected ? `Imprimir en Cocina (${printerName})` : 'Conectar Impresora Bluetooth (Cocina)'}
             </span>
           </button>
 
@@ -273,12 +275,12 @@ export const KitchenTicketModal: React.FC<KitchenTicketModalProps> = ({
             className="flex items-center justify-center space-x-2 px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-stone-950 font-black rounded-xl text-xs shadow-md transition-all active:scale-95 cursor-pointer"
           >
             <Printer className="w-4 h-4" />
-            <span>Imprimir Térmica (Sistema)</span>
+            <span>Imprimir Térmica Cocina</span>
           </button>
 
           <button
             onClick={handleClose}
-            className="px-3.5 py-2.5 bg-stone-800 hover:bg-stone-700 text-stone-300 font-semibold rounded-xl text-xs"
+            className="px-3.5 py-2.5 bg-stone-800 hover:bg-stone-700 text-stone-300 font-semibold rounded-xl text-xs cursor-pointer"
           >
             Cerrar
           </button>
