@@ -551,7 +551,7 @@ export const PlatosView: React.FC<PlatosViewProps> = ({ platos, onRefresh, onOpe
               {/* Precio y Categoria en 2 cols */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-stone-300 font-semibold mb-1">Precio ($ USD / Bs):</label>
+                  <label className="block text-stone-300 font-semibold mb-1">Precio ($ Pesos Colombianos):</label>
                   <div className="relative">
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-500 font-bold">$</span>
                     <input
@@ -559,11 +559,11 @@ export const PlatosView: React.FC<PlatosViewProps> = ({ platos, onRefresh, onOpe
                       required
                       value={formData.Precio}
                       onChange={(e) => setFormData({ ...formData, Precio: e.target.value })}
-                      placeholder="ej: 8000 o 8.000"
+                      placeholder="ej: 18000 o 18.000"
                       className="w-full pl-7 pr-3 py-2.5 bg-stone-950 border border-stone-700 rounded-xl text-stone-100 font-bold focus:outline-none focus:border-amber-500"
                     />
                   </div>
-                  <p className="text-[10px] text-stone-500 mt-1">Escriba 8000 o 8.000 (sin error de centavos)</p>
+                  <p className="text-[10px] text-stone-500 mt-1">Precio de venta al público en Pesos Colombianos ($ COP)</p>
                 </div>
 
                 <div>

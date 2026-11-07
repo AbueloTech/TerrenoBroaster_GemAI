@@ -32,6 +32,7 @@ import {
   HelpCircle,
   Sparkles,
   Printer,
+  Flame,
 } from 'lucide-react';
 import {
   Insumo,
@@ -174,6 +175,17 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
   const [newRecetaInsumoIdSelect, setNewRecetaInsumoIdSelect] = useState<number | ''>('');
   const [newRecetaCantidadInput, setNewRecetaCantidadInput] = useState<number>(1);
   const [newRecetaNotasInput, setNewRecetaNotasInput] = useState<string>('');
+  const [createdRecetaPlatoId, setCreatedRecetaPlatoId] = useState<number | null>(null);
+  const [newRecetaPromoActiva, setNewRecetaPromoActiva] = useState<boolean>(false);
+  const [newRecetaPromoTipo, setNewRecetaPromoTipo] = useState<'Porcentaje' | 'PrecioFijo' | '2x1' | '3x1' | 'NxM'>('Porcentaje');
+  const [newRecetaPromoValor, setNewRecetaPromoValor] = useState<number>(15);
+  const [newRecetaPromoNxMLleva, setNewRecetaPromoNxMLleva] = useState<number>(2);
+  const [newRecetaPromoNxMPaga, setNewRecetaPromoNxMPaga] = useState<number>(1);
+  const [newRecetaPromoVigencia, setNewRecetaPromoVigencia] = useState<'Siempre' | 'Intervalo' | 'DiasSemana'>('Siempre');
+  const [newRecetaPromoFechaInicio, setNewRecetaPromoFechaInicio] = useState<string>('');
+  const [newRecetaPromoFechaFin, setNewRecetaPromoFechaFin] = useState<string>('');
+  const [newRecetaPromoDiasSemana, setNewRecetaPromoDiasSemana] = useState<number[]>([1, 2, 3, 4, 5]);
+  const [newRecetaPromoEtiqueta, setNewRecetaPromoEtiqueta] = useState<string>('');
 
   // Custom in-app confirmation modal for deletions (replaces window.confirm which fails in iframe sandbox)
   const [deleteModalState, setDeleteModalState] = useState<{
@@ -367,6 +379,9 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
 
   const filteredEscandalloPlatos = useMemo(() => {
     return platos.filter((plato) => {
+      // CRITICAL: Always keep currently active dish visible so editing or adding ingredients/promos never causes it to disappear
+      if (selectedPlatoId !== null && plato.ID === selectedPlatoId) return true;
+
       const esc = escandallos.find((e) => e.PlatoId === plato.ID);
       const hasReceta = esc && esc.TieneReceta && !esc.EsVentaDirecta;
       const isDirectSale = Boolean(esc && esc.EsVentaDirecta);
@@ -377,7 +392,7 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
       if (escandalloFilter === 'sinReceta') return isOrphan;
       return true;
     });
-  }, [platos, escandallos, escandalloFilter]);
+  }, [platos, escandallos, escandalloFilter, selectedPlatoId]);
 
   // Insumos Filtered
   const filteredInsumos = useMemo(() => {
@@ -467,6 +482,7 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
   // Save Manual Selling Price directly from Escandallos tab
   const handleSaveManualPrice = () => {
     if (!selectedPlato) return;
+    const currentId = selectedPlato.ID;
     const cleanPrice = safeParsePrice(manualPrecioVenta);
     if (cleanPrice <= 0) {
       showToast('Introduce un precio válido mayor a 0');
@@ -485,13 +501,15 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
         });
       }
     }
-    showToast(`¡Precio de "${selectedPlato.Plato}" fijado a $${cleanPrice.toFixed(2)} en el menú POS!`);
+    showToast(`¡Precio de "${selectedPlato.Plato}" fijado a $${cleanPrice.toLocaleString()} en el menú POS!`);
     loadData();
+    setSelectedPlatoId(currentId);
     if (onRefreshPlatos) onRefreshPlatos();
   };
 
   // Open New Culinary Recipe Modal
   const openNewRecetaModal = () => {
+    setCreatedRecetaPlatoId(null);
     setNewRecetaNombre('');
     setNewRecetaCategoria('Pollo');
     setNewRecetaDescripcion('');
@@ -500,6 +518,16 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
     setNewRecetaInsumoIdSelect(insumos.length > 0 ? insumos[0].InsumoId : '');
     setNewRecetaCantidadInput(1);
     setNewRecetaNotasInput('');
+    setNewRecetaPromoActiva(false);
+    setNewRecetaPromoTipo('Porcentaje');
+    setNewRecetaPromoValor(15);
+    setNewRecetaPromoNxMLleva(2);
+    setNewRecetaPromoNxMPaga(1);
+    setNewRecetaPromoVigencia('Siempre');
+    setNewRecetaPromoFechaInicio('');
+    setNewRecetaPromoFechaFin('');
+    setNewRecetaPromoDiasSemana([1, 2, 3, 4, 5]);
+    setNewRecetaPromoEtiqueta('');
     setIsNewRecetaModalOpen(true);
   };
 
@@ -529,9 +557,9 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
     setNewRecetaIngredientes((prev) => prev.filter((_, idx) => idx !== index));
   };
 
-  // Save new recipe and create dish in Platos & Recetas
-  const handleSaveNewReceta = (e: React.FormEvent) => {
-    e.preventDefault();
+  // Save new recipe and create/update dish in Platos & Recetas
+  const handleSaveNewReceta = (e?: React.FormEvent, keepOpen = false) => {
+    if (e && e.preventDefault) e.preventDefault();
     if (!newRecetaNombre.trim()) {
       showToast('Por favor introduce el nombre del plato / receta.');
       return;
@@ -542,33 +570,81 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
       return;
     }
 
-    const created = sqliteService.createPlatoWithReceta(
-      {
-        nombre: newRecetaNombre.trim(),
-        categoria: newRecetaCategoria.trim() || 'Pollo',
-        descripcion: newRecetaDescripcion.trim(),
-        precio: cleanPrice,
-      },
-      newRecetaIngredientes.map((ing) => ({
-        insumoId: ing.insumoId,
-        cantidad: ing.cantidad,
-        unidadMedida: ing.unidadMedida,
-        notas: ing.notas,
-      }))
-    );
+    let targetPlatoId = createdRecetaPlatoId;
+    let targetPlatoNombre = newRecetaNombre.trim();
 
-    setIsNewRecetaModalOpen(false);
-    showToast(`¡Receta y plato "${created.Plato}" creados y publicados en la carta POS!`);
+    if (targetPlatoId) {
+      const existing = platos.find((p) => p.ID === targetPlatoId);
+      sqliteService.updatePlato({
+        ID: targetPlatoId,
+        Plato: targetPlatoNombre,
+        Categoria: newRecetaCategoria.trim() || 'Pollo',
+        Descripcion: newRecetaDescripcion.trim(),
+        Precio: cleanPrice,
+        Imagen: existing?.Imagen || '',
+      });
+      sqliteService.setRecetaForPlato(
+        targetPlatoId,
+        newRecetaIngredientes.map((ing) => ({
+          insumoId: ing.insumoId,
+          cantidad: ing.cantidad,
+          unidadMedida: ing.unidadMedida,
+          notas: ing.notas,
+        }))
+      );
+    } else {
+      const created = sqliteService.createPlatoWithReceta(
+        {
+          nombre: targetPlatoNombre,
+          categoria: newRecetaCategoria.trim() || 'Pollo',
+          descripcion: newRecetaDescripcion.trim(),
+          precio: cleanPrice,
+        },
+        newRecetaIngredientes.map((ing) => ({
+          insumoId: ing.insumoId,
+          cantidad: ing.cantidad,
+          unidadMedida: ing.unidadMedida,
+          notas: ing.notas,
+        }))
+      );
+      targetPlatoId = created.ID;
+      setCreatedRecetaPlatoId(created.ID);
+    }
+
+    if (targetPlatoId) {
+      sqliteService.updatePlatoPromo(targetPlatoId, {
+        PromoActiva: newRecetaPromoActiva,
+        PromoTipo: newRecetaPromoTipo,
+        PromoValor: safeParsePrice(newRecetaPromoValor),
+        PromoNxMLleva: newRecetaPromoTipo === '2x1' ? 2 : newRecetaPromoTipo === '3x1' ? 3 : newRecetaPromoTipo === 'NxM' ? newRecetaPromoNxMLleva : undefined,
+        PromoNxMPaga: newRecetaPromoTipo === '2x1' ? 1 : newRecetaPromoTipo === '3x1' ? 1 : newRecetaPromoTipo === 'NxM' ? newRecetaPromoNxMPaga : undefined,
+        PromoVigencia: newRecetaPromoVigencia,
+        PromoFechaInicio: newRecetaPromoFechaInicio || undefined,
+        PromoFechaFin: newRecetaPromoFechaFin || undefined,
+        PromoDiasSemana: JSON.stringify(newRecetaPromoDiasSemana),
+        PromoEtiqueta: newRecetaPromoEtiqueta.trim() || undefined,
+      });
+    }
+
     loadData();
-    setSelectedPlatoId(created.ID);
-    setSubTab('escandallos');
+    setSelectedPlatoId(targetPlatoId);
+    setEscandalloFilter('todos');
     if (onRefreshPlatos) onRefreshPlatos();
+
+    if (keepOpen) {
+      showToast(`¡Receta y promoción de "${targetPlatoNombre}" guardadas! Puedes continuar editando.`);
+    } else {
+      setIsNewRecetaModalOpen(false);
+      showToast(`¡Receta y plato "${targetPlatoNombre}" publicados en la carta POS!`);
+      setSubTab('escandallos');
+    }
   };
 
   // Save Dish Promotion directly from Escandallos tab
   const handleSaveDishPromo = () => {
     if (!selectedPlatoId || !selectedPlato) return;
-    const ok = sqliteService.updatePlatoPromo(selectedPlatoId, {
+    const currentId = selectedPlatoId;
+    const ok = sqliteService.updatePlatoPromo(currentId, {
       PromoActiva: dishPromoActiva,
       PromoTipo: dishPromoTipo,
       PromoValor: safeParsePrice(dishPromoValor),
@@ -586,18 +662,21 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
     if (ok) {
       showToast(
         dishPromoActiva
-          ? `¡Promoción para "${selectedPlato.Plato}" activada y publicada en POS!`
-          : `Promoción de "${selectedPlato.Plato}" desactivada.`
+          ? `¡Promoción para "${selectedPlato.Plato}" guardada y publicada en POS!`
+          : `Promoción de "${selectedPlato.Plato}" guardada (desactivada).`
       );
       loadData();
+      setSelectedPlatoId(currentId);
       if (onRefreshPlatos) onRefreshPlatos();
     }
   };
 
-  // Save Insumo Form
-  const handleSaveInsumo = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const formData = new FormData(e.currentTarget);
+  // Save Insumo Form with support for keepOpen
+  const handleSaveInsumo = (e?: React.FormEvent<HTMLFormElement>, keepOpen = false) => {
+    if (e && e.preventDefault) e.preventDefault();
+    const form = e?.currentTarget || (document.getElementById('insumo-edit-form') as HTMLFormElement | null);
+    if (!form) return;
+    const formData = new FormData(form);
     const nombre = String(formData.get('nombre') || '').trim();
     const categoria = formData.get('categoria') as InsumoCategoria;
     const unidad = formData.get('unidad') as UnidadMedida;
@@ -643,7 +722,6 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
         ...promoData,
       };
       sqliteService.updateInsumo(savedInsumo);
-      showToast(`Insumo "${nombre}" actualizado correctamente.`);
     } else {
       savedInsumo = sqliteService.addInsumo({
         Nombre: nombre,
@@ -657,19 +735,24 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
         EsVentaDirecta: esVentaDirecta,
         ...promoData,
       });
-      showToast(`Insumo "${nombre}" creado correctamente.`);
     }
 
     // Automatically sync or publish to POS Menu if selected
     if (esVentaDirecta && modalSyncPlato && precioVenta && precioVenta > 0) {
       sqliteService.syncDirectSalePlato(savedInsumo.InsumoId, nombre, precioVenta, categoria);
-      showToast(`Producto "${nombre}" publicado en la Carta del Menú POS.`);
       if (onRefreshPlatos) onRefreshPlatos();
     }
 
-    setIsInsumoModalOpen(false);
-    setEditingInsumo(null);
     loadData();
+
+    if (keepOpen) {
+      setEditingInsumo(savedInsumo);
+      showToast(`¡Insumo "${nombre}" guardado! Puedes continuar editándolo.`);
+    } else {
+      setIsInsumoModalOpen(false);
+      setEditingInsumo(null);
+      showToast(`¡Insumo "${nombre}" guardado correctamente!`);
+    }
   };
 
   // Quick Stock Adjustment
@@ -764,17 +847,21 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
     const updated = recetaItems.filter((i) => i.InsumoId !== insumoId);
     setRecetaItems(updated);
     if (selectedPlatoId !== null) {
-      sqliteService.setRecetaForPlato(selectedPlatoId, updated);
+      const currentId = selectedPlatoId;
+      sqliteService.setRecetaForPlato(currentId, updated);
       loadData();
+      setSelectedPlatoId(currentId);
       showToast('Ingrediente retirado de la ficha técnica.');
     }
   };
 
   const handleSaveReceta = () => {
     if (selectedPlatoId === null) return;
-    sqliteService.setRecetaForPlato(selectedPlatoId, recetaItems);
+    const currentId = selectedPlatoId;
+    sqliteService.setRecetaForPlato(currentId, recetaItems);
     showToast('¡Ficha Técnica y Escandallo guardados con éxito!');
     loadData();
+    setSelectedPlatoId(currentId);
   };
 
   // Apply suggested price directly to Plato in POS Menu
@@ -3355,7 +3442,7 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
               </button>
             </div>
 
-            <form onSubmit={handleSaveInsumo} className="flex flex-col flex-1 overflow-hidden min-h-0">
+            <form id="insumo-edit-form" onSubmit={(e) => handleSaveInsumo(e, false)} className="flex flex-col flex-1 overflow-hidden min-h-0">
               <div className="p-6 space-y-4 overflow-y-auto flex-1 min-h-0 overscroll-contain">
               {/* Nombre */}
               <div>
@@ -4045,20 +4132,29 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
                     </span>
                   )}
                 </div>
-                <div className="flex items-center space-x-3 w-full sm:w-auto justify-end">
+                <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
                   <button
                     type="button"
                     onClick={() => setIsInsumoModalOpen(false)}
-                    className="px-4 py-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 font-bold text-xs cursor-pointer transition-colors"
+                    className="px-3.5 py-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 font-bold text-xs cursor-pointer transition-colors"
                   >
-                    Cancelar
+                    Cerrar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSaveInsumo(undefined, true)}
+                    className="px-4 py-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-amber-300 border border-amber-500/30 font-bold text-xs cursor-pointer transition-all flex items-center gap-1.5 active:scale-95 shadow-sm"
+                    title="Guarda los cambios y deja el formulario abierto para seguir editando"
+                  >
+                    <Save className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Guardar y Seguir Editando</span>
                   </button>
                   <button
                     type="submit"
                     className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-black text-xs sm:text-sm transition-all shadow-lg active:scale-95 cursor-pointer flex items-center gap-1.5"
                   >
-                    <Save className="w-4 h-4" />
-                    <span>{editingInsumo ? 'Actualizar Insumo' : 'Guardar Insumo'}</span>
+                    <Check className="w-4 h-4" />
+                    <span>{editingInsumo ? 'Actualizar y Cerrar' : 'Guardar y Cerrar'}</span>
                   </button>
                 </div>
               </div>
@@ -4681,22 +4777,215 @@ export const InventarioView: React.FC<InventarioViewProps> = ({ onRefreshPlatos 
                 </div>
               </div>
 
+              {/* Bloque 4: Configuración de Promoción & Oferta Especial (Opcional) */}
+              <div className="space-y-4 pt-3 border-t border-stone-800">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black uppercase tracking-wider text-rose-400 block flex items-center gap-1.5">
+                    <Sparkles className="w-4 h-4 text-rose-400" />
+                    <span>4. Promoción & Oferta Especial (Opcional)</span>
+                  </span>
+
+                  <label className="flex items-center gap-2 cursor-pointer bg-stone-950 px-3 py-1.5 rounded-xl border border-stone-800 hover:border-rose-500/50 transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={newRecetaPromoActiva}
+                      onChange={(e) => setNewRecetaPromoActiva(e.target.checked)}
+                      className="w-4 h-4 accent-rose-500 rounded cursor-pointer"
+                    />
+                    <span className="text-xs font-bold text-stone-200">
+                      {newRecetaPromoActiva ? 'Promo Habilitada' : 'Sin Promoción'}
+                    </span>
+                  </label>
+                </div>
+
+                {newRecetaPromoActiva && (
+                  <div className="p-4 bg-stone-950 rounded-2xl border border-rose-500/30 space-y-4 animate-in fade-in duration-150">
+                    {/* Modalidad de promo */}
+                    <div className="space-y-2">
+                      <label className="block text-xs font-bold text-stone-300 uppercase tracking-wider">
+                        Modalidad de la Promoción:
+                      </label>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setNewRecetaPromoTipo('Porcentaje')}
+                          className={`p-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                            newRecetaPromoTipo === 'Porcentaje'
+                              ? 'bg-rose-600 text-white shadow-md'
+                              : 'bg-stone-900 border border-stone-800 text-stone-400 hover:text-white'
+                          }`}
+                        >
+                          <Percent className="w-3.5 h-3.5" />
+                          <span>Porcentaje (%)</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNewRecetaPromoTipo('PrecioFijo');
+                            if (newRecetaPromoValor < 100 && newRecetaPrecioVenta > 0) {
+                              setNewRecetaPromoValor(Math.round(newRecetaPrecioVenta * 0.8));
+                            }
+                          }}
+                          className={`p-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                            newRecetaPromoTipo === 'PrecioFijo'
+                              ? 'bg-rose-600 text-white shadow-md'
+                              : 'bg-stone-900 border border-stone-800 text-stone-400 hover:text-white'
+                          }`}
+                        >
+                          <DollarSign className="w-3.5 h-3.5" />
+                          <span>Precio Fijo ($)</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNewRecetaPromoTipo('2x1');
+                            setNewRecetaPromoNxMLleva(2);
+                            setNewRecetaPromoNxMPaga(1);
+                          }}
+                          className={`p-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                            newRecetaPromoTipo === '2x1'
+                              ? 'bg-rose-600 text-white shadow-md'
+                              : 'bg-stone-900 border border-stone-800 text-stone-400 hover:text-white'
+                          }`}
+                        >
+                          <Flame className="w-3.5 h-3.5" />
+                          <span>Promo 2x1</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNewRecetaPromoTipo('3x1');
+                            setNewRecetaPromoNxMLleva(3);
+                            setNewRecetaPromoNxMPaga(1);
+                          }}
+                          className={`p-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                            newRecetaPromoTipo === '3x1'
+                              ? 'bg-rose-600 text-white shadow-md'
+                              : 'bg-stone-900 border border-stone-800 text-stone-400 hover:text-white'
+                          }`}
+                        >
+                          <Flame className="w-3.5 h-3.5" />
+                          <span>Promo 3x1</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Valor de promo */}
+                    {newRecetaPromoTipo === 'Porcentaje' && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
+                        <div>
+                          <label className="text-xs font-bold text-stone-300 block mb-1">
+                            Porcentaje de Descuento (%):
+                          </label>
+                          <input
+                            type="number"
+                            min="1"
+                            max="99"
+                            value={newRecetaPromoValor}
+                            onChange={(e) => setNewRecetaPromoValor(safeParsePrice(e.target.value))}
+                            className="w-full bg-stone-900 border border-stone-700 rounded-xl px-3 py-2 text-xs font-mono font-bold text-white focus:outline-none focus:border-rose-500"
+                          />
+                        </div>
+                        <div className="text-xs text-stone-400">
+                          Precio promocional resultante:{' '}
+                          <span className="font-mono font-bold text-emerald-400 text-sm">
+                            ${Math.round(newRecetaPrecioVenta * (1 - newRecetaPromoValor / 100)).toLocaleString()}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    {newRecetaPromoTipo === 'PrecioFijo' && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
+                        <div>
+                          <label className="text-xs font-bold text-stone-300 block mb-1">
+                            Precio de Oferta Especial ($):
+                          </label>
+                          <input
+                            type="number"
+                            min="1"
+                            value={newRecetaPromoValor}
+                            onChange={(e) => setNewRecetaPromoValor(safeParsePrice(e.target.value))}
+                            className="w-full bg-stone-900 border border-stone-700 rounded-xl px-3 py-2 text-xs font-mono font-bold text-white focus:outline-none focus:border-rose-500"
+                          />
+                        </div>
+                        <div className="text-xs text-stone-400">
+                          Rebaja de{' '}
+                          <span className="font-mono font-bold text-rose-400">
+                            ${Math.max(0, newRecetaPrecioVenta - newRecetaPromoValor).toLocaleString()}
+                          </span>{' '}
+                          respecto al precio base.
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Vigencia */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-stone-800">
+                      <div>
+                        <label className="text-xs font-bold text-stone-300 block mb-1">
+                          Vigencia de la Promo:
+                        </label>
+                        <select
+                          value={newRecetaPromoVigencia}
+                          onChange={(e) => setNewRecetaPromoVigencia(e.target.value as any)}
+                          className="w-full bg-stone-900 border border-stone-700 rounded-xl px-3 py-2 text-xs text-stone-200 focus:outline-none focus:border-rose-500"
+                        >
+                          <option value="Siempre">Permanente (Siempre activa)</option>
+                          <option value="DiasSemana">Días Especiales de Semana</option>
+                          <option value="Intervalo">Intervalo de Fechas (Campaña)</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="text-xs font-bold text-stone-300 block mb-1">
+                          Etiqueta Visible (Opcional):
+                        </label>
+                        <input
+                          type="text"
+                          value={newRecetaPromoEtiqueta}
+                          onChange={(e) => setNewRecetaPromoEtiqueta(e.target.value)}
+                          placeholder="ej: PROMO BROASTER, JUEVES 2x1"
+                          className="w-full bg-stone-900 border border-stone-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-rose-500"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Form Buttons */}
-              <div className="pt-3 border-t border-stone-800 flex items-center justify-end space-x-3">
+              <div className="pt-4 border-t border-stone-800 flex flex-wrap items-center justify-between gap-3">
                 <button
                   type="button"
                   onClick={() => setIsNewRecetaModalOpen(false)}
                   className="px-4 py-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 font-bold text-xs cursor-pointer transition-colors"
                 >
-                  Cancelar
+                  Cerrar
                 </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs sm:text-sm transition-all shadow-md cursor-pointer active:scale-95 flex items-center gap-1.5"
-                >
-                  <ChefHat className="w-4 h-4" />
-                  <span>Guardar Receta y Publicar en Carta</span>
-                </button>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleSaveNewReceta(undefined, true)}
+                    className="px-4 py-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-amber-300 border border-amber-500/30 font-bold text-xs cursor-pointer transition-all flex items-center gap-1.5 active:scale-95 shadow-sm"
+                    title="Guarda la receta con su promo y deja el modal abierto para continuar añadiendo insumos o editando"
+                  >
+                    <Save className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Guardar y Seguir Editando</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleSaveNewReceta(undefined, false)}
+                    className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs sm:text-sm transition-all shadow-md cursor-pointer active:scale-95 flex items-center gap-1.5"
+                  >
+                    <ChefHat className="w-4 h-4" />
+                    <span>Guardar Receta y Publicar en Carta</span>
+                  </button>
+                </div>
               </div>
             </form>
           </div>

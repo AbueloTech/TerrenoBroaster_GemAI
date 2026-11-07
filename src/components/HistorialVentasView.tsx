@@ -36,11 +36,12 @@ export const HistorialVentasView: React.FC<HistorialVentasViewProps> = ({
   initialSubTab = 'ventas',
   onOpenCierreCajaModal,
 }) => {
-  // Date range defaults: Last 30 days
-  const todayStr = new Date().toISOString().split('T')[0];
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  // Date range defaults: strictly TODAY by default to avoid huge data overload
+  const now = new Date();
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
-  const [fechaInicial, setFechaInicial] = useState<string>(thirtyDaysAgo);
+  const [viewMode, setViewMode] = useState<'hoy' | 'global' | 'intervalo'>('hoy');
+  const [fechaInicial, setFechaInicial] = useState<string>(todayStr);
   const [fechaFinal, setFechaFinal] = useState<string>(todayStr);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [selectedFormaPago, setSelectedFormaPago] = useState<string>('Todas');
@@ -63,27 +64,34 @@ export const HistorialVentasView: React.FC<HistorialVentasViewProps> = ({
 
   // Quick Date Helpers
   const setQuickRange = (range: 'hoy' | 'ayer' | 'semana' | 'mes' | 'todo') => {
-    const now = new Date();
-    const today = now.toISOString().split('T')[0];
+    const nowDate = new Date();
+    const today = `${nowDate.getFullYear()}-${String(nowDate.getMonth() + 1).padStart(2, '0')}-${String(nowDate.getDate()).padStart(2, '0')}`;
 
     if (range === 'hoy') {
+      setViewMode('hoy');
       setFechaInicial(today);
       setFechaFinal(today);
     } else if (range === 'ayer') {
-      const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      setViewMode('intervalo');
+      const yesterdayDate = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const yesterday = `${yesterdayDate.getFullYear()}-${String(yesterdayDate.getMonth() + 1).padStart(2, '0')}-${String(yesterdayDate.getDate()).padStart(2, '0')}`;
       setFechaInicial(yesterday);
       setFechaFinal(yesterday);
     } else if (range === 'semana') {
-      const startOfWeek = new Date(now);
+      setViewMode('intervalo');
+      const startOfWeek = new Date(nowDate);
       const day = startOfWeek.getDay() || 7; // Monday as 1
       startOfWeek.setDate(startOfWeek.getDate() - day + 1);
-      setFechaInicial(startOfWeek.toISOString().split('T')[0]);
+      const startWeekStr = `${startOfWeek.getFullYear()}-${String(startOfWeek.getMonth() + 1).padStart(2, '0')}-${String(startOfWeek.getDate()).padStart(2, '0')}`;
+      setFechaInicial(startWeekStr);
       setFechaFinal(today);
     } else if (range === 'mes') {
-      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-      setFechaInicial(startOfMonth);
+      setViewMode('intervalo');
+      const startMonthStr = `${nowDate.getFullYear()}-${String(nowDate.getMonth() + 1).padStart(2, '0')}-01`;
+      setFechaInicial(startMonthStr);
       setFechaFinal(today);
     } else if (range === 'todo') {
+      setViewMode('global');
       setFechaInicial('2020-01-01');
       setFechaFinal(today);
     }
@@ -275,18 +283,138 @@ export const HistorialVentasView: React.FC<HistorialVentasViewProps> = ({
       {/* DATE RANGE FILTER CONTAINER */}
       <div className="bg-stone-900 border border-stone-800 rounded-2xl p-4 sm:p-5 shadow-lg space-y-4">
         
-        {/* Date Inputs & Quick Buttons */}
-        <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4">
-          
-          {/* Inputs for Fecha Inicial y Fecha Final */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+        {/* Mode Selector Tabs (Hoy vs Global vs Intervalo) */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-stone-800">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[11px] font-bold text-stone-400 uppercase tracking-wider mr-1">
+              Visualización:
+            </span>
+
+            {/* Option 1: Ventas de Hoy (Default) */}
+            <button
+              type="button"
+              onClick={() => setQuickRange('hoy')}
+              className={`flex items-center space-x-2 px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                viewMode === 'hoy'
+                  ? 'bg-amber-500 text-stone-950 shadow-md ring-2 ring-amber-400/40'
+                  : 'bg-stone-950 text-stone-300 border border-stone-800 hover:border-stone-700 hover:text-white'
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5 text-stone-950" />
+              <span>Ventas de Hoy</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                viewMode === 'hoy' ? 'bg-stone-950/20 text-stone-950' : 'bg-stone-800 text-amber-400'
+              }`}>
+                {todayStr}
+              </span>
+            </button>
+
+            {/* Option 2: Histórico Global */}
+            <button
+              type="button"
+              onClick={() => setQuickRange('todo')}
+              className={`flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                viewMode === 'global'
+                  ? 'bg-amber-500 text-stone-950 font-black shadow-md ring-2 ring-amber-400/40'
+                  : 'bg-stone-950 text-stone-300 border border-stone-800 hover:border-stone-700 hover:text-white'
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span>Todas las Ventas (Global)</span>
+            </button>
+
+            {/* Option 3: Por Intervalo de Fechas */}
+            <button
+              type="button"
+              onClick={() => setViewMode('intervalo')}
+              className={`flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                viewMode === 'intervalo'
+                  ? 'bg-amber-500 text-stone-950 font-black shadow-md ring-2 ring-amber-400/40'
+                  : 'bg-stone-950 text-stone-300 border border-stone-800 hover:border-stone-700 hover:text-white'
+              }`}
+            >
+              <Calendar className="w-3.5 h-3.5" />
+              <span>Por Intervalo de Fechas</span>
+            </button>
+          </div>
+
+          {/* Quick preset chips when in Interval mode */}
+          {viewMode === 'intervalo' && (
+            <div className="flex items-center space-x-1.5 overflow-x-auto pb-1">
+              <span className="text-[11px] font-semibold text-stone-400 mr-1 hidden sm:inline">Accesos:</span>
+              <button
+                onClick={() => setQuickRange('ayer')}
+                className="px-2.5 py-1 text-xs bg-stone-800 hover:bg-stone-700 text-stone-200 rounded-lg transition-colors cursor-pointer"
+              >
+                Ayer
+              </button>
+              <button
+                onClick={() => setQuickRange('semana')}
+                className="px-2.5 py-1 text-xs bg-stone-800 hover:bg-stone-700 text-stone-200 rounded-lg transition-colors cursor-pointer"
+              >
+                Esta Semana
+              </button>
+              <button
+                onClick={() => setQuickRange('mes')}
+                className="px-2.5 py-1 text-xs bg-stone-800 hover:bg-stone-700 text-stone-200 rounded-lg transition-colors cursor-pointer"
+              >
+                Este Mes
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Notice Banner for 'Hoy' mode */}
+        {viewMode === 'hoy' && (
+          <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/30 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-emerald-300">
+            <div className="flex items-center space-x-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+              <span>
+                Mostrando únicamente las <strong>ventas del día de hoy ({todayStr})</strong> para evitar acumulación innecesaria en pantalla.
+              </span>
+            </div>
+            <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+              <button
+                onClick={() => setQuickRange('todo')}
+                className="text-[11px] font-bold text-amber-400 hover:text-amber-300 underline cursor-pointer"
+              >
+                Cargar Histórico Global &rarr;
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Notice Banner for 'Global' mode */}
+        {viewMode === 'global' && (
+          <div className="p-2.5 bg-amber-500/10 border border-amber-500/30 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-amber-300">
+            <div className="flex items-center space-x-2">
+              <Layers className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>
+                Mostrando el <strong>acumulado total histórico</strong> de todas las ventas registradas en la base de datos.
+              </span>
+            </div>
+            <button
+              onClick={() => setQuickRange('hoy')}
+              className="text-[11px] font-bold text-emerald-400 hover:text-emerald-300 underline cursor-pointer self-end sm:self-auto shrink-0"
+            >
+              Volver a Solo Ventas de Hoy &rarr;
+            </button>
+          </div>
+        )}
+
+        {/* Date Inputs row (visible when in 'intervalo' mode or for fine-tuning) */}
+        {viewMode === 'intervalo' && (
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 pt-1">
             <div className="flex items-center space-x-2">
               <Calendar className="w-4 h-4 text-amber-400 shrink-0" />
               <label className="text-xs font-bold text-stone-300 whitespace-nowrap">Fecha Inicial:</label>
               <input
                 type="date"
                 value={fechaInicial}
-                onChange={(e) => setFechaInicial(e.target.value)}
+                onChange={(e) => {
+                  setViewMode('intervalo');
+                  setFechaInicial(e.target.value);
+                }}
                 className="py-1.5 px-3 bg-stone-950 border border-stone-700 rounded-xl text-stone-100 text-xs font-mono focus:outline-none focus:border-amber-500"
               />
             </div>
@@ -296,48 +424,15 @@ export const HistorialVentasView: React.FC<HistorialVentasViewProps> = ({
               <input
                 type="date"
                 value={fechaFinal}
-                onChange={(e) => setFechaFinal(e.target.value)}
+                onChange={(e) => {
+                  setViewMode('intervalo');
+                  setFechaFinal(e.target.value);
+                }}
                 className="py-1.5 px-3 bg-stone-950 border border-stone-700 rounded-xl text-stone-100 text-xs font-mono focus:outline-none focus:border-amber-500"
               />
             </div>
           </div>
-
-          {/* Quick preset chips */}
-          <div className="flex items-center space-x-1.5 overflow-x-auto pb-1">
-            <span className="text-[11px] font-semibold text-stone-400 mr-1 hidden sm:inline">Rápido:</span>
-            <button
-              onClick={() => setQuickRange('hoy')}
-              className="px-2.5 py-1 text-xs bg-stone-800 hover:bg-stone-700 text-stone-200 rounded-lg transition-colors"
-            >
-              Hoy
-            </button>
-            <button
-              onClick={() => setQuickRange('ayer')}
-              className="px-2.5 py-1 text-xs bg-stone-800 hover:bg-stone-700 text-stone-200 rounded-lg transition-colors"
-            >
-              Ayer
-            </button>
-            <button
-              onClick={() => setQuickRange('semana')}
-              className="px-2.5 py-1 text-xs bg-stone-800 hover:bg-stone-700 text-stone-200 rounded-lg transition-colors"
-            >
-              Esta Semana
-            </button>
-            <button
-              onClick={() => setQuickRange('mes')}
-              className="px-2.5 py-1 text-xs bg-stone-800 hover:bg-stone-700 text-stone-200 rounded-lg transition-colors"
-            >
-              Este Mes
-            </button>
-            <button
-              onClick={() => setQuickRange('todo')}
-              className="px-2.5 py-1 text-xs bg-stone-800 hover:bg-stone-700 text-stone-200 rounded-lg transition-colors"
-            >
-              Todo
-            </button>
-          </div>
-
-        </div>
+        )}
 
         {/* Summary Metric Ribbon */}
         <div className="pt-3 border-t border-stone-800/80 flex flex-wrap items-center justify-between gap-4 text-xs">

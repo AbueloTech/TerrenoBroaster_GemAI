@@ -257,7 +257,7 @@ export const DashboardView: React.FC = () => {
           <div className="flex items-center space-x-3 text-xs">
             <div className="flex items-center space-x-1.5">
               <span className="w-3 h-3 rounded-full bg-amber-500 inline-block" />
-              <span className="text-stone-300 font-medium">Facturación ($ USD)</span>
+              <span className="text-stone-300 font-medium">Facturación ($ COP)</span>
             </div>
           </div>
         </div>
